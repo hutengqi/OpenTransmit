@@ -1,0 +1,117 @@
+# ============================================================
+# macOS 系统文件
+# ============================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================================================
+# Xcode / Swift 构建产物
+# ============================================================
+.build/
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# Xcode 用户级状态（本地 scheme、断点、窗口状态等）
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Swift Package Manager
+.swiftpm/
+# 注意：应用/工程请提交 Package.resolved 以锁定依赖版本，勿忽略
+
+# ============================================================
+# AI 编码助手 / Agent 工具目录
+# ============================================================
+.codex/
+.omo/
+.codegraph
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.continue/
+.windsurf/
+.agents/
+.agent/
+.specstory/
+.github/copilot/
+
+# ============================================================
+# 隐私、密钥与签名相关（切勿提交）
+# ============================================================
+# Apple 签名证书与描述文件
+*.p12
+*.pfx
+*.cer
+*.crt
+*.der
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+AuthKey_*.p8
+*.p8
+
+# Java / Android 密钥库（多平台通用）
+*.keystore
+*.jks
+
+# 钥匙串
+*.keychain
+*.keychain-db
+
+# 环境变量与本地配置
+.env
+.env.*
+!.env.example
+*Secrets.xcconfig
+Local.xcconfig
+*.local.xcconfig
+
+# 凭据文件
+.netrc
+_netrc
+credentials.json
+service-account*.json
+id_rsa*
+id_ed25519*
+
+# 证书导出配置（可能包含 Team ID，按需保留）
+ExportOptions.plist
+
+# ============================================================
+# 编辑器 / 临时文件
+# ============================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+*.tmp
+*.log
