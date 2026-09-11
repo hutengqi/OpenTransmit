@@ -17,13 +17,13 @@ struct LocationMenu: View {
                 if servers.isEmpty { Text("尚未添加服务器") }
                 ForEach(servers) { server in
                     Button("\(server.name)（\(server.protocolKind.rawValue)）") { connectingServer = server }
-                        .disabled(server.protocolKind != .sftp || transfers.running)
+                        .disabled(server.protocolKind != .sftp || transfers.running || transfers.deleting)
                 }
                 Button("添加服务器…", systemImage: "plus", action: addServer)
             }
             if pane.isRemote {
                 Divider()
-                Button("断开连接") { pane.disconnect() }.disabled(transfers.running)
+                Button("断开连接") { pane.disconnect() }.disabled(transfers.running || transfers.deleting)
             }
         } label: {
             Label(title, systemImage: "folder.badge.plus")

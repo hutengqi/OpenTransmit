@@ -35,7 +35,7 @@ struct ContentView: View {
                             Button("连接到右栏") { connectLeft = false; connectingServer = server }.disabled(server.protocolKind != .sftp || transfers.running)
                             Divider()
                             Button("删除服务器配置", role: .destructive) {
-                                library.servers.removeAll { $0.id == server.id }; library.save()
+                                library.deleteServer(server)
                             }
                         }
                     }

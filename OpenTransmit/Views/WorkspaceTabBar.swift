@@ -8,6 +8,14 @@ import SwiftUI
 
     init(name: String? = nil) { self.name = name }
     var title: String {
+        let leftURL = left.directory
+        let rightURL = right.directory
+        if let leftURL, let rightURL, leftURL.isRemoteFile && rightURL.isRemoteFile {
+            return "\(leftURL.user ?? "SFTP") ↔ \(rightURL.user ?? "SFTP")"
+        }
+        if let remote = [leftURL, rightURL].compactMap({ $0 }).first(where: { $0.isRemoteFile }) {
+            return remote.path.isEmpty ? "/" : remote.path
+        }
         if let name { return name }
         func label(_ pane: PaneStore) -> String {
             guard let url = pane.directory else { return "未选择" }

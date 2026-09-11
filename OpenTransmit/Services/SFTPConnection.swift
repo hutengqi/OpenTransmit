@@ -107,6 +107,45 @@ actor SFTPRegistry: TransferEndpoint {
     func disconnect(_ url: URL) async {
         if let host = url.host, let connection = sessions.removeValue(forKey: host) { await connection.close() }
     }
+    /// Frozen UI selection only; directories are removed bottom-up and links are unlinked.
+    func delete(_ urls: [URL]) async -> TrashResult {
+        var result = TrashResult()
+        var seen: Set<URL> = []
+        let selected = urls.filter { seen.insert($0).inserted }
+        // A selected ancestor already covers its descendants.
+        let roots = selected.filter { candidate in
+            !selected.contains { parent in
+                parent != candidate && parent.host == candidate.host && parent.scheme == candidate.scheme &&
+                candidate.path.hasPrefix(parent.path.hasSuffix("/") ? parent.path : parent.path + "/")
+            }
+        }
+        for url in roots {
+            do {
+                try await deleteTree(url, depth: 0)
+                result.completed.append(url)
+            } catch {
+                result.failures.append("\(url.locationLabel)：\(error.transferDescription)（目录可能已部分删除）")
+            }
+        }
+        return result
+    }
+    private func deleteTree(_ url: URL, depth: Int) async throws {
+        guard url.isRemoteFile, !url.path.isEmpty, url.path != "/",
+              !url.pathComponents.contains(".."), !url.pathComponents.contains("."), depth <= 128 else {
+            throw TransferFailure(message: "不能删除服务器根目录、无效路径或过深的目录。")
+        }
+        try Task.checkCancellation()
+        guard let item = try await entry(url) else { throw TransferFailure(message: "远程项目已不存在。") }
+        let session = try connection(url)
+        if item.isDirectory && !item.isSymbolicLink {
+            for child in try await children(url) {
+                try await deleteTree(child.url, depth: depth + 1)
+            }
+            try await session.perform { try await $0.rmdir(at: url.path) }
+        } else {
+            try await session.perform { try await $0.remove(at: url.path) }
+        }
+    }
     private func connection(_ url: URL) throws -> SFTPConnection {
         guard url.isRemoteFile, let host = url.host, let connection = sessions[host] else { throw TransferFailure(message: "服务器连接已关闭，请重新连接。") }
         return connection

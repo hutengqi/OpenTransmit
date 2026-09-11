@@ -113,7 +113,7 @@ struct NativeFileTable: NSViewRepresentable {
                 ("复制", #selector(copyRows), !table.selectedRowIndexes.isEmpty),
                 ("粘贴", #selector(pasteRows), parent.canPaste && !PaneFileActions.clipboardURLs.isEmpty),
                 ("复制到另一栏", #selector(copyAcross), parent.canCopy && !table.selectedRowIndexes.isEmpty),
-                ("移到废纸篓…", #selector(deleteRows), parent.canDelete && !table.selectedRowIndexes.isEmpty)
+                (parent.entries.first?.url.isRemoteFile == true ? "永久删除…" : "移到废纸篓…", #selector(deleteRows), parent.canDelete && !table.selectedRowIndexes.isEmpty)
             ] {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self

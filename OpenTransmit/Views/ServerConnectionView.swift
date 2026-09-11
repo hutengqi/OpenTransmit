@@ -7,6 +7,8 @@ struct ServerConnectionView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var credentials = SSHCredentials()
     @State private var keyName = "未选择私钥"
+    @State private var didLoadCredentials = false
+    @State private var remember = false
     @State private var connecting = false
     @State private var message: String?
     @State private var challenge: HostKeyChallenge?
@@ -20,13 +22,21 @@ struct ServerConnectionView: View {
                 Picker("认证方式", selection: $credentials.method) {
                     ForEach(SSHCredentials.Method.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                if credentials.method == .password { SecureField("密码", text: $credentials.password) }
+                if credentials.method == .password { RevealableSecretField(title: "密码", text: $credentials.password) }
                 else {
                     HStack { Text(keyName).lineLimit(1); Spacer(); Button("选择私钥…") { chooseKey() } }
-                    SecureField("私钥口令（可选）", text: $credentials.passphrase)
+                    RevealableSecretField(title: "私钥口令（可选）", text: $credentials.passphrase)
+                }
+                Toggle("将密码或私钥口令保存在本机钥匙串", isOn: $remember)
+                Button("清除此服务器已保存的凭据", role: .destructive) {
+                    do {
+                        try CredentialVault(server: server).removeAll()
+                        credentials.password = ""; credentials.passphrase = ""; remember = false
+                        message = "已清除保存的凭据。"
+                    } catch { message = error.localizedDescription }
                 }
             }.disabled(connecting)
-            Text("认证信息仅用于本次连接，不保存到服务器资料。私钥支持 OpenSSH 格式。").font(.caption).foregroundStyle(.secondary)
+            Text("勾选后仅在连接成功时保存；未勾选不保存新输入。私钥文件本身不保存，每次需重新选择。清除按钮可删除已有凭据。").font(.caption).foregroundStyle(.secondary)
             if let challenge {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(challenge.changed ? "主机指纹变化，已拒绝连接" : "首次连接：请核对主机指纹").font(.headline)
@@ -48,6 +58,12 @@ struct ServerConnectionView: View {
             }
         }.padding(24).frame(width: 500)
         .interactiveDismissDisabled(connecting)
+        .onAppear {
+            guard !didLoadCredentials else { return }
+            didLoadCredentials = true
+            loadSavedSecret()
+        }
+        .onChange(of: credentials.method) { _, _ in loadSavedSecret() }
         .onDisappear { task?.cancel(); credentials = SSHCredentials() }
     }
     private func chooseKey() {
@@ -62,7 +78,22 @@ struct ServerConnectionView: View {
             guard size < 1024 * 1024 else { throw TransferFailure(message: "私钥文件过大。") }
             credentials.privateKey = try String(contentsOf: url, encoding: .utf8)
             keyName = url.lastPathComponent
+            loadSavedSecret()
         } catch { message = error.transferDescription }
+    }
+    private func loadSavedSecret() {
+        remember = false
+        credentials.password = ""; credentials.passphrase = ""
+        guard credentials.method == .password || credentials.privateKey != nil else { return }
+        let vault = CredentialVault(server: server)
+        do {
+            let key = credentials.method == .password ? nil : credentials.privateKey
+            if let secret = try vault.read(account: vault.account(privateKey: key)) {
+                if credentials.method == .password { credentials.password = secret }
+                else { credentials.passphrase = secret }
+                remember = true
+            }
+        } catch { message = error.localizedDescription }
     }
     private func connect() {
         connecting = true; message = nil
@@ -72,6 +103,17 @@ struct ServerConnectionView: View {
             do {
                 let url = try await SFTPRegistry.shared.connect(server, credentials: credentials, trustedKey: trusted)
                 guard !Task.isCancelled else { await SFTPRegistry.shared.disconnect(url); return }
+                if remember {
+                    let vault = CredentialVault(server: server)
+                    do {
+                        let key = credentials.method == .password ? nil : credentials.privateKey
+                        try vault.save(credentials.method == .password ? credentials.password : credentials.passphrase,
+                                       account: vault.account(privateKey: key))
+                    } catch {
+                        await SFTPRegistry.shared.disconnect(url)
+                        throw error
+                    }
+                }
                 pane.openRemote(url)
                 self.credentials = SSHCredentials()
                 dismiss()

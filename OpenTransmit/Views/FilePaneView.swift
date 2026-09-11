@@ -35,8 +35,8 @@ struct FilePaneView: View {
                 Button("粘贴", systemImage: "doc.on.clipboard") { PaneFileActions.paste(into: pane.directory, transfers: transfers) }
                     .disabled(pane.directory == nil || transfers.deleting).help("粘贴到当前目录（⌘V）")
                 Button("删除", systemImage: "trash", role: .destructive) { PaneFileActions.confirmDelete(pane.selectedURLs, transfers: transfers) }
-                    .disabled(pane.isRemote || pane.selection.isEmpty || transfers.running || transfers.deleting)
-                    .help(pane.isRemote ? "远程删除尚未开放" : "移到废纸篓，需确认（⌘⌫）；传输期间暂不可用")
+                    .disabled(pane.selection.isEmpty || transfers.running || transfers.deleting)
+                    .help(pane.isRemote ? "永久删除远程项目，需确认（⌘⌫）" : "移到废纸篓，需确认（⌘⌫）；传输期间暂不可用")
                 Spacer(minLength: 0)
                 if transfers.deleting { ProgressView().controlSize(.small) }
             }.buttonStyle(.borderless).padding(.horizontal, 12).padding(.bottom, 10)
@@ -60,7 +60,7 @@ struct FilePaneView: View {
                                 receive: { urls in
                                     if let directory = pane.directory { transfers.enqueue(urls, to: directory) }
                                 }, canCopy: other.directory != nil && !transfers.deleting,
-                                canPaste: !transfers.deleting, canDelete: !pane.isRemote && !transfers.running && !transfers.deleting)
+                                canPaste: !transfers.deleting, canDelete: !transfers.running && !transfers.deleting)
                 .overlay { if pane.entries.isEmpty && !pane.loading { Text("此目录为空").foregroundStyle(.secondary).allowsHitTesting(false) } }
             }
             Divider()

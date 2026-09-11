@@ -14,6 +14,13 @@ import Observation
             workspaces = saved.workspaces
         } catch { self.error = "无法读取保存的资料：\(error.localizedDescription)" }
     }
+    func deleteServer(_ server: ServerProfile) {
+        do {
+            try CredentialVault(server: server).removeAll()
+            servers.removeAll { $0.id == server.id }
+            save()
+        } catch { self.error = error.localizedDescription }
+    }
     func save() {
         do {
             let data = try JSONEncoder().encode(Library(servers: servers, workspaces: workspaces))
