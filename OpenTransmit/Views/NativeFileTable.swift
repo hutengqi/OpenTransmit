@@ -4,6 +4,8 @@ import AppKit
 /// AppKit owns desktop drag sessions; SwiftUI remains the owner of file and selection state.
 struct NativeFileTable: NSViewRepresentable {
     let entries: [FileEntry]
+    let canGoUp: Bool
+    let goUp: () -> Void
     @Binding var selection: Set<URL>
     let open: (URL) -> Void
     let copySelection: () -> Void
@@ -51,14 +53,14 @@ struct NativeFileTable: NSViewRepresentable {
     }
     func updateNSView(_ view: NSScrollView, context: Context) {
         let coordinator = context.coordinator
-        let changed = coordinator.parent.entries != entries
+        let changed = coordinator.parent.entries != entries || coordinator.parent.canGoUp != canGoUp
         coordinator.parent = self
         guard let table = coordinator.table else { return }
         table.permitsPaste = canPaste
         table.permitsDelete = canDelete
         coordinator.updating = true
         if changed { table.reloadData() }
-        let indexes = IndexSet(entries.indices.filter { selection.contains(entries[$0].url) })
+        let indexes = IndexSet(entries.indices.filter { selection.contains(entries[$0].url) }.map { $0 + coordinator.offset })
         if table.selectedRowIndexes != indexes { table.selectRowIndexes(indexes, byExtendingSelection: false) }
         coordinator.updating = false
     }
@@ -68,9 +70,30 @@ struct NativeFileTable: NSViewRepresentable {
         weak var table: FileActionTableView?
         var updating = false
         init(_ parent: NativeFileTable) { self.parent = parent }
-        func numberOfRows(in tableView: NSTableView) -> Int { parent.entries.count }
+        var offset: Int { parent.canGoUp ? 1 : 0 }
+        func entry(at row: Int) -> FileEntry? {
+            let index = row - offset
+            return parent.entries.indices.contains(index) ? parent.entries[index] : nil
+        }
+        func numberOfRows(in tableView: NSTableView) -> Int { parent.entries.count + offset }
+        func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { entry(at: row) != nil }
+        func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet {
+            IndexSet(proposedSelectionIndexes.filter { entry(at: $0) != nil })
+        }
+        @objc func goUp() { parent.goUp() }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            let entry = parent.entries[row]
+            if parent.canGoUp && row == 0 {
+                guard tableColumn?.identifier.rawValue == "name" else { return NSTextField(labelWithString: "") }
+                let button = NSButton(title: "..", target: self, action: #selector(goUp))
+                button.isBordered = false
+                button.alignment = .left
+                button.image = NSImage(systemSymbolName: "arrow.turn.up.left", accessibilityDescription: nil)
+                button.imagePosition = .imageLeading
+                button.toolTip = "返回上一级目录"
+                button.setAccessibilityLabel(".. 返回上一级目录")
+                return button
+            }
+            guard let entry = entry(at: row) else { return nil }
             let identifier = tableColumn?.identifier.rawValue ?? "name"
             let text: String
             switch identifier {
@@ -91,11 +114,10 @@ struct NativeFileTable: NSViewRepresentable {
         }
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let table else { return }
-            parent.selection = Set(table.selectedRowIndexes.compactMap { parent.entries.indices.contains($0) ? parent.entries[$0].url : nil })
+            parent.selection = Set(table.selectedRowIndexes.compactMap { entry(at: $0)?.url })
         }
         @objc func openRow() {
-            guard let table, parent.entries.indices.contains(table.clickedRow) else { return }
-            let entry = parent.entries[table.clickedRow]
+            guard let table, let entry = entry(at: table.clickedRow) else { return }
             if entry.isDirectory { parent.open(entry.url) }
         }
         @objc func copyRows() { parent.copySelection() }
@@ -105,6 +127,12 @@ struct NativeFileTable: NSViewRepresentable {
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
             guard let table else { return }
+            if parent.canGoUp && table.clickedRow == 0 {
+                let item = NSMenuItem(title: "返回上一级目录", action: #selector(goUp), keyEquivalent: "")
+                item.target = self
+                menu.addItem(item)
+                return
+            }
             if table.clickedRow >= 0 && !table.selectedRowIndexes.contains(table.clickedRow) {
                 table.selectRowIndexes(IndexSet(integer: table.clickedRow), byExtendingSelection: false)
             }
@@ -122,7 +150,7 @@ struct NativeFileTable: NSViewRepresentable {
             }
         }
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-            parent.entries[row].url as NSURL
+            entry(at: row)?.url as NSURL?
         }
         func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
             tableView.setDropRow(-1, dropOperation: .on)

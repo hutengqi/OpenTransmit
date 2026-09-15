@@ -9,8 +9,11 @@ struct ContentView: View {
     private var right: PaneStore { activeTab.right }
     @State private var transfers = TransferStore()
     @State private var showServer = false
+    @State private var editingServer: ServerProfile?
+    @State private var workspaceDirection: TransferDirection = .unspecified
     @State private var showWorkspace = false
     @State private var workspaceName = ""
+    @State private var savingTabID: UUID?
     @State private var connectingServer: ServerProfile?
     @State private var connectLeft = false
     @State private var error: String?
@@ -29,11 +32,12 @@ struct ContentView: View {
                             Label(server.name, systemImage: "server.rack")
                             Text("\(server.protocolKind.rawValue) · \(server.host)").font(.caption).foregroundStyle(.secondary)
                         }
-                        .help(server.protocolKind == .sftp ? "右键选择连接到左栏或右栏" : "该协议连接尚未实现")
+                        .help("右键选择连接到左栏或右栏")
                         .contextMenu {
-                            Button("连接到左栏") { connectLeft = true; connectingServer = server }.disabled(server.protocolKind != .sftp || transfers.running)
-                            Button("连接到右栏") { connectLeft = false; connectingServer = server }.disabled(server.protocolKind != .sftp || transfers.running)
+                            Button("连接到左栏") { connectLeft = true; connectingServer = server }.disabled(transfers.running || transfers.deleting)
+                            Button("连接到右栏") { connectLeft = false; connectingServer = server }.disabled(transfers.running || transfers.deleting)
                             Divider()
+                            Button("编辑服务器…", systemImage: "pencil") { editingServer = server }
                             Button("删除服务器配置", role: .destructive) {
                                 library.deleteServer(server)
                             }
@@ -57,8 +61,19 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
         } detail: {
             VStack(spacing: 0) {
-                WorkspaceTabBar(tabs: tabs, selectedID: activeTab.id, canClose: !transfers.running && !transfers.deleting, select: { selectedTabID = $0 }, add: addTab, close: closeTab)
+                WorkspaceTabBar(tabs: tabs, selectedID: activeTab.id, canClose: !transfers.running && !transfers.deleting, select: { selectedTabID = $0 }, add: addTab, close: closeTab, save: beginSave)
                 Divider()
+                if activeTab.direction != .unspecified {
+                    HStack {
+                        Text("默认方向：\(activeTab.direction.title)").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("传输所选文件（\(activeTab.direction.title)）", systemImage: activeTab.direction == .leftToRight ? "arrow.right" : "arrow.left") {
+                            transferInDefaultDirection()
+                        }
+                        .disabled(defaultSource.selectedURLs.isEmpty || defaultTarget.directory == nil || defaultSource.loading || defaultTarget.loading || transfers.deleting)
+                    }.font(.callout).padding(.horizontal, 12).padding(.vertical, 6)
+                    Divider()
+                }
                 HSplitView {
                     FilePaneView(title: "左栏", pane: left, other: right, transfers: transfers, servers: library.servers, addServer: { showServer = true })
                     FilePaneView(title: "右栏", pane: right, other: left, transfers: transfers, servers: library.servers, addServer: { showServer = true })
@@ -73,20 +88,25 @@ struct ContentView: View {
                 Button("新建标签页", systemImage: "plus.rectangle.on.rectangle", action: addTab)
                     .keyboardShortcut("t", modifiers: .command)
                 Button("添加服务器", systemImage: "server.rack") { showServer = true }
-                Button("保存工作区", systemImage: "bookmark") { showWorkspace = true }
-                    .disabled(left.directory == nil || right.directory == nil || left.isRemote || right.isRemote)
-                    .help("当前工作区保存仅支持两端均为本地目录")
+                Button("保存工作区", systemImage: "bookmark") { beginSave(activeTab.id) }
+                    .disabled(left.directory == nil || right.directory == nil)
+                    .help("保存左右栏的本地目录或服务器位置")
                 Button("刷新两栏", systemImage: "arrow.clockwise") { left.refresh(); right.refresh() }
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
         .sheet(item: $connectingServer) { ServerConnectionView(server: $0, pane: connectLeft ? left : right) }
+        .sheet(item: $editingServer) { ServerEditorView(library: library, server: $0) }
         .sheet(isPresented: $showServer) { ServerEditorView(library: library) }
         .sheet(isPresented: $showWorkspace) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("保存工作区").font(.title2.bold())
-                Text("保存左右目录。再次打开时恢复位置，不会自动复制。").foregroundStyle(.secondary)
+                Text("保存左右目录。恢复时使用已保存密码连接远程服务器，不会自动传输文件。").foregroundStyle(.secondary)
                 TextField("工作区名称", text: $workspaceName)
+                Picker("默认传输方向", selection: $workspaceDirection) {
+                    ForEach(TransferDirection.allCases) { Text($0.title).tag($0) }
+                }
+                Text("方向仅用于快捷传输按钮；拖拽和两栏复制仍按实际操作执行。").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
                     Button("取消") { showWorkspace = false }.keyboardShortcut(.cancelAction)
@@ -103,6 +123,14 @@ struct ContentView: View {
         } message: { Text(error ?? library.error ?? "") }
         .onAppear { transfers.onChange = { for tab in tabs { tab.left.refresh(); tab.right.refresh() } } }
     }
+    private var defaultSource: PaneStore { activeTab.direction == .rightToLeft ? right : left }
+    private var defaultTarget: PaneStore { activeTab.direction == .rightToLeft ? left : right }
+    private func transferInDefaultDirection() {
+        guard activeTab.direction != .unspecified, !transfers.deleting,
+              !defaultSource.loading, !defaultTarget.loading,
+              let destination = defaultTarget.directory else { return }
+        transfers.enqueue(defaultSource.selectedURLs, to: destination)
+    }
     private func addTab() {
         let tab = WorkspaceTab()
         tabs.append(tab)
@@ -117,9 +145,31 @@ struct ContentView: View {
         if tabs.isEmpty { tabs.append(WorkspaceTab()) }
         if wasSelected { selectedTabID = tabs[min(index, tabs.count - 1)].id }
     }
+    private func beginSave(_ id: UUID) {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        savingTabID = id
+        workspaceName = tab.title
+        workspaceDirection = tab.direction
+        showWorkspace = true
+    }
     private func saveWorkspace() {
         do {
-            library.workspaces.append(Workspace(name: workspaceName.trimmingCharacters(in: .whitespacesAndNewlines), leftBookmark: try left.bookmark(), rightBookmark: try right.bookmark()))
+            guard let tab = tabs.first(where: { $0.id == savingTabID }) else { return }
+            var workspace = Workspace(name: workspaceName.trimmingCharacters(in: .whitespacesAndNewlines))
+            func remote(_ pane: PaneStore) throws -> WorkspaceRemote {
+                guard let server = pane.serverProfile, let url = pane.directory,
+                      library.servers.contains(where: { $0.id == server.id }) else {
+                    throw TransferFailure(message: "服务器配置已不存在，请先保存服务器并重新连接。")
+                }
+                return WorkspaceRemote(serverID: server.id, path: url.path)
+            }
+            if tab.left.isRemote { workspace.leftRemote = try remote(tab.left) }
+            else { workspace.leftBookmark = try tab.left.bookmark() }
+            if tab.right.isRemote { workspace.rightRemote = try remote(tab.right) }
+            else { workspace.rightBookmark = try tab.right.bookmark() }
+            workspace.direction = workspaceDirection
+            tab.direction = workspaceDirection
+            library.workspaces.append(workspace)
             library.save()
             workspaceName = ""
             showWorkspace = false
@@ -128,9 +178,22 @@ struct ContentView: View {
     private func restore(_ workspace: Workspace) {
         do {
             let tab = WorkspaceTab(name: workspace.name)
-            try tab.left.restore(workspace.leftBookmark); try tab.right.restore(workspace.rightBookmark)
+            tab.direction = workspace.direction ?? .unspecified
+            func restorePane(_ pane: PaneStore, bookmark: Data?, remote: WorkspaceRemote?) throws {
+                if let remote {
+                    guard var server = library.servers.first(where: { $0.id == remote.serverID }) else {
+                        throw TransferFailure(message: "工作区引用的服务器配置已被删除，请重新保存工作区。")
+                    }
+                    server.directory = remote.path
+                    pane.pendingConnection = server
+                } else if let bookmark { try pane.restore(bookmark) }
+                else { throw TransferFailure(message: "工作区缺少目录资料。") }
+            }
+            try restorePane(tab.left, bookmark: workspace.leftBookmark, remote: workspace.leftRemote)
+            try restorePane(tab.right, bookmark: workspace.rightBookmark, remote: workspace.rightRemote)
             tabs.append(tab); selectedTabID = tab.id
+            tab.left.restoreSavedConnection(); tab.right.restoreSavedConnection()
         }
-        catch { self.error = "无法恢复目录，请重新选择目录并保存工作区。\n\(error.localizedDescription)" }
+        catch { self.error = "无法恢复工作区：\(error.localizedDescription)" }
     }
 }

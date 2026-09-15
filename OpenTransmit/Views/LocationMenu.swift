@@ -17,7 +17,7 @@ struct LocationMenu: View {
                 if servers.isEmpty { Text("尚未添加服务器") }
                 ForEach(servers) { server in
                     Button("\(server.name)（\(server.protocolKind.rawValue)）") { connectingServer = server }
-                        .disabled(server.protocolKind != .sftp || transfers.running || transfers.deleting)
+                        .disabled(transfers.running || transfers.deleting)
                 }
                 Button("添加服务器…", systemImage: "plus", action: addServer)
             }

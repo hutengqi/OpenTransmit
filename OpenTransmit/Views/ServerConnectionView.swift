@@ -7,36 +7,58 @@ struct ServerConnectionView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var credentials = SSHCredentials()
     @State private var keyName = "未选择私钥"
+    @State private var allowsPlaintext = false
     @State private var didLoadCredentials = false
     @State private var remember = false
+    @State private var needsUnlock = false
     @State private var connecting = false
     @State private var message: String?
     @State private var challenge: HostKeyChallenge?
     @State private var task: Task<Void, Never>?
 
     var body: some View {
+        if server.protocolKind == .smb { SMBConnectionView(server: server, pane: pane) }
+        else { credentialBody }
+    }
+
+    private var credentialBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("连接 \(server.name)").font(.title2.bold())
-            Text("SFTP · \(server.username)@\(server.host):\(String(server.port))").foregroundStyle(.secondary)
+            Text("\(server.protocolKind.rawValue) · \(server.username)@\(server.host):\(String(server.port))").foregroundStyle(.secondary)
             Form {
-                Picker("认证方式", selection: $credentials.method) {
-                    ForEach(SSHCredentials.Method.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                if server.protocolKind == .sftp {
+                    Picker("认证方式", selection: $credentials.method) {
+                        ForEach(SSHCredentials.Method.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                }
+                if server.protocolKind == .ftp {
+                    Text("FTP 不加密：密码、文件名和文件内容均以明文传输。建议改用 FTPS 或 SFTP。")
+                        .foregroundStyle(.orange)
+                    Toggle("我了解风险，允许本次明文 FTP 连接", isOn: $allowsPlaintext)
+                } else if server.protocolKind == .ftps {
+                    Text("显式 FTPS：强制加密控制及数据通道，校验证书链和主机名，不允许跳过验证。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if credentials.method == .password { RevealableSecretField(title: "密码", text: $credentials.password) }
                 else {
                     HStack { Text(keyName).lineLimit(1); Spacer(); Button("选择私钥…") { chooseKey() } }
                     RevealableSecretField(title: "私钥口令（可选）", text: $credentials.passphrase)
                 }
-                Toggle("将密码或私钥口令保存在本机钥匙串", isOn: $remember)
+                Toggle("记住密码或私钥口令，下次自动填入", isOn: $remember)
+                if needsUnlock {
+                    Button("解锁已保存的凭据…") { loadSavedSecret(allowInteraction: true) }
+                    Text("macOS 需要重新授权钥匙串访问。解锁一次后，本次运行会复用凭据；重新编译的临时签名可能再次触发授权。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button("清除此服务器已保存的凭据", role: .destructive) {
                     do {
                         try CredentialVault(server: server).removeAll()
-                        credentials.password = ""; credentials.passphrase = ""; remember = false
+                        credentials.password = ""; credentials.passphrase = ""; remember = false; needsUnlock = false
                         message = "已清除保存的凭据。"
                     } catch { message = error.localizedDescription }
                 }
             }.disabled(connecting)
-            Text("勾选后仅在连接成功时保存；未勾选不保存新输入。私钥文件本身不保存，每次需重新选择。清除按钮可删除已有凭据。").font(.caption).foregroundStyle(.secondary)
+            Text("勾选后仅在连接成功时保存到本机钥匙串，下次连接或恢复工作区自动填入。本次运行复用已授权凭据；系统锁定或签名变化仍可能要求解锁。私钥文件本身不保存，每次需重新选择。").font(.caption).foregroundStyle(.secondary)
             if let challenge {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(challenge.changed ? "主机指纹变化，已拒绝连接" : "首次连接：请核对主机指纹").font(.headline)
@@ -54,7 +76,7 @@ struct ServerConnectionView: View {
                 Spacer()
                 Button("取消") { task?.cancel(); dismiss() }.keyboardShortcut(.cancelAction)
                 Button("连接") { connect() }.keyboardShortcut(.defaultAction)
-                    .disabled(connecting || (credentials.method != .password && credentials.privateKey == nil) || challenge?.changed == true)
+                    .disabled(connecting || (server.protocolKind == .ftp && !allowsPlaintext) || (credentials.method != .password && credentials.privateKey == nil) || challenge?.changed == true)
             }
         }.padding(24).frame(width: 500)
         .interactiveDismissDisabled(connecting)
@@ -81,21 +103,26 @@ struct ServerConnectionView: View {
             loadSavedSecret()
         } catch { message = error.transferDescription }
     }
-    private func loadSavedSecret() {
+    private func loadSavedSecret(allowInteraction: Bool = false) {
+        needsUnlock = false
         remember = false
         credentials.password = ""; credentials.passphrase = ""
         guard credentials.method == .password || credentials.privateKey != nil else { return }
         let vault = CredentialVault(server: server)
         do {
             let key = credentials.method == .password ? nil : credentials.privateKey
-            if let secret = try vault.read(account: vault.account(privateKey: key)) {
+            if let secret = try vault.read(account: vault.account(privateKey: key), allowInteraction: allowInteraction, useSessionCache: true) {
                 if credentials.method == .password { credentials.password = secret }
                 else { credentials.passphrase = secret }
                 remember = true
             }
+        } catch let error as CredentialVault.VaultError {
+            needsUnlock = true
+            if allowInteraction { message = error.localizedDescription }
         } catch { message = error.localizedDescription }
     }
     private func connect() {
+        guard server.protocolKind != .ftp || allowsPlaintext else { return }
         connecting = true; message = nil
         let credentials = self.credentials
         let trusted = SSHHostTrust.key(for: server)
@@ -108,13 +135,13 @@ struct ServerConnectionView: View {
                     do {
                         let key = credentials.method == .password ? nil : credentials.privateKey
                         try vault.save(credentials.method == .password ? credentials.password : credentials.passphrase,
-                                       account: vault.account(privateKey: key))
+                                       account: vault.account(privateKey: key), cacheForSession: true)
                     } catch {
                         await SFTPRegistry.shared.disconnect(url)
                         throw error
                     }
                 }
-                pane.openRemote(url)
+                pane.openRemote(url, server: server)
                 self.credentials = SSHCredentials()
                 dismiss()
             } catch let challenge as HostKeyChallenge { self.challenge = challenge }

@@ -1,8 +1,9 @@
 import SwiftUI
 
-@MainActor final class WorkspaceTab: Identifiable {
+@MainActor @Observable final class WorkspaceTab: Identifiable {
     let id = UUID()
     let name: String?
+    var direction: TransferDirection = .unspecified
     let left = PaneStore()
     let right = PaneStore()
 
@@ -33,6 +34,7 @@ struct WorkspaceTabBar: View {
     let select: (UUID) -> Void
     let add: () -> Void
     let close: (UUID) -> Void
+    let save: (UUID) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -52,6 +54,10 @@ struct WorkspaceTabBar: View {
                                 .disabled(!canClose)
                                 .help(canClose ? "关闭标签页" : "传输或删除期间暂不可关闭标签页")
                                 .accessibilityLabel("关闭标签页：\(tab.title)")
+                        }
+                        .contextMenu {
+                            Button("保存工作区…", systemImage: "bookmark") { save(tab.id) }
+                                .disabled(tab.left.directory == nil || tab.right.directory == nil)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 8)
                         .background(tab.id == selectedID ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))

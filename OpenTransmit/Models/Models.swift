@@ -16,11 +16,25 @@ struct ServerProfile: Identifiable, Codable, Sendable {
     var directory = "/"
 }
 
+enum TransferDirection: String, Codable, CaseIterable, Identifiable {
+    case unspecified, leftToRight, rightToLeft
+    var id: String { rawValue }
+    var title: String { switch self { case .unspecified: "不设默认方向"; case .leftToRight: "左 → 右"; case .rightToLeft: "右 → 左" } }
+}
+
 struct Workspace: Identifiable, Codable {
     var id = UUID()
     var name: String
-    var leftBookmark: Data
-    var rightBookmark: Data
+    var leftBookmark: Data? = nil
+    var rightBookmark: Data? = nil
+    var leftRemote: WorkspaceRemote? = nil
+    var rightRemote: WorkspaceRemote? = nil
+    var direction: TransferDirection? = nil
+}
+
+struct WorkspaceRemote: Codable {
+    let serverID: UUID
+    let path: String
 }
 
 struct FileEntry: Identifiable, Sendable, Equatable {

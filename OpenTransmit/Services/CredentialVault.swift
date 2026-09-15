@@ -4,7 +4,19 @@ import CryptoKit
 
 /// Secrets never enter the library JSON. Items stay on this Mac and are scoped
 /// to the saved profile, endpoint and (for passphrases) the selected key contents.
+private final class CredentialSessionCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var secrets: [String: String] = [:]
+    func read(_ key: String) -> String? { lock.lock(); defer { lock.unlock() }; return secrets[key] }
+    func save(_ value: String, key: String) { lock.lock(); defer { lock.unlock() }; secrets[key] = value }
+    func remove(prefix: String) {
+        lock.lock(); defer { lock.unlock() }
+        secrets = secrets.filter { !$0.key.hasPrefix(prefix) }
+    }
+}
+
 struct CredentialVault {
+    private static let cache = CredentialSessionCache()
     private let service: String
     private let endpoint: String
 
@@ -27,8 +39,11 @@ struct CredentialVault {
         return result
     }
 
-    func read(account: String) throws -> String? {
+    func read(account: String, allowInteraction: Bool = true, useSessionCache: Bool = false) throws -> String? {
+        let cacheKey = service + "|" + account
+        if useSessionCache, let secret = Self.cache.read(cacheKey) { return secret }
         var request = query(account)
+        if !allowInteraction { request[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail }
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -38,10 +53,11 @@ struct CredentialVault {
         guard let data = result as? Data, let value = String(data: data, encoding: .utf8) else {
             throw VaultError(status: errSecDecode)
         }
+        if useSessionCache { Self.cache.save(value, key: cacheKey) }
         return value
     }
 
-    func save(_ secret: String, account: String) throws {
+    func save(_ secret: String, account: String, cacheForSession: Bool = false) throws {
         let attributes: [String: Any] = [kSecValueData as String: Data(secret.utf8),
                                         kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
         let status = SecItemUpdate(query(account) as CFDictionary, attributes as CFDictionary)
@@ -51,9 +67,12 @@ struct CredentialVault {
             item[kSecAttrLabel as String] = "OpenTransmit 服务器凭据"
             try check(SecItemAdd(item as CFDictionary, nil))
         } else { try check(status) }
+        Self.cache.remove(prefix: service + "|" + account)
+        if cacheForSession { Self.cache.save(secret, key: service + "|" + account) }
     }
 
     func removeAll() throws {
+        Self.cache.remove(prefix: service + "|")
         var request = query()
         request[kSecMatchLimit as String] = kSecMatchLimitAll
         let status = SecItemDelete(request as CFDictionary)

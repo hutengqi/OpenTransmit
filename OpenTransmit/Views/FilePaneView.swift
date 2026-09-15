@@ -9,6 +9,7 @@ struct FilePaneView: View {
     let servers: [ServerProfile]
     let addServer: () -> Void
     @State private var isTargeted = false
+    @State private var restoringServer: ServerProfile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,8 +25,36 @@ struct FilePaneView: View {
             }.padding(12)
             HStack {
                 Image(systemName: "folder").foregroundStyle(.secondary)
-                Text(pane.directory?.locationLabel ?? "请选择本地目录或服务器开始浏览")
-                    .font(.callout).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                if pane.directory != nil {
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 6) {
+                                ForEach(pane.breadcrumbURLs, id: \.self) { url in
+                                    if url != pane.breadcrumbURLs.first {
+                                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                    }
+                                    Button {
+                                        if url != pane.directory { pane.navigate(url) }
+                                    } label: {
+                                        Text(url.path == "/" ? (url.isRemoteFile ? "\(url.user ?? "服务器") /" : "/") : url.lastPathComponent)
+                                            .lineLimit(1)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(url == pane.directory)
+                                    .help(url.locationLabel)
+                                    .accessibilityLabel("跳转到 \(url.locationLabel)")
+                                    .id(url)
+                                }
+                            }.font(.callout)
+                        }.scrollIndicators(.hidden)
+                        .onAppear { if let url = pane.directory { proxy.scrollTo(url, anchor: .trailing) } }
+                        .onChange(of: pane.directory) { _, url in
+                            if let url { proxy.scrollTo(url, anchor: .trailing) }
+                        }
+                    }
+                } else {
+                    Text("请选择本地目录或服务器开始浏览").font(.callout)
+                }
                 Spacer(minLength: 0)
                 if pane.loading { ProgressView().controlSize(.small) }
             }.padding(.horizontal, 12).padding(.bottom, 10)
@@ -43,16 +72,43 @@ struct FilePaneView: View {
             Divider()
             if pane.directory == nil {
                 ContentUnavailableView {
-                    Label("选择\(title)位置", systemImage: "folder")
+                    Label(pane.pendingConnection == nil ? "选择\(title)位置" : "恢复远程目录", systemImage: pane.pendingConnection == nil ? "folder" : "server.rack")
                 } description: {
-                    Text("选择本地目录、已挂载的共享或已保存的服务器\n然后将文件拖到另一栏进行复制")
-                } actions: { LocationMenu(pane: pane, servers: servers, transfers: transfers, title: "选择位置…", addServer: addServer).buttonStyle(.borderedProminent) }
+                    if let server = pane.pendingConnection {
+                        VStack(spacing: 6) {
+                            Text(server.name).font(.headline).lineLimit(2)
+                            Text(server.directory)
+                                .lineLimit(3).truncationMode(.middle)
+                                .textSelection(.enabled).help(server.directory)
+                            if pane.loading {
+                                ProgressView("正在恢复连接…").controlSize(.small)
+                            } else {
+                                Text(pane.restorationMessage ?? "连接服务器后，恢复此工作区保存的目录。")
+                            }
+                        }
+                        .frame(maxWidth: 280)
+                    } else {
+                        Text("选择本地目录、已挂载的共享或已保存的服务器\n然后将文件拖到另一栏进行复制")
+                    }
+                } actions: {
+                    VStack(spacing: 12) {
+                        if let server = pane.pendingConnection {
+                            Button("连接并恢复", systemImage: "arrow.clockwise") { restoringServer = server }
+                                .buttonStyle(.borderedProminent).disabled(pane.loading)
+                            LocationMenu(pane: pane, servers: servers, transfers: transfers, title: "选择其他位置…", addServer: addServer)
+                                .buttonStyle(.bordered)
+                        } else {
+                            LocationMenu(pane: pane, servers: servers, transfers: transfers, title: "选择位置…", addServer: addServer)
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }
+                }
                 .frame(maxHeight: .infinity)
             } else if let error = pane.error {
                 ContentUnavailableView("无法读取目录", systemImage: "exclamationmark.folder", description: Text(error))
                     .frame(maxHeight: .infinity)
             } else {
-                NativeFileTable(entries: pane.entries, selection: $pane.selection,
+                NativeFileTable(entries: pane.entries, canGoUp: pane.canGoUp, goUp: { pane.up() }, selection: $pane.selection,
                                 open: { pane.navigate($0) }, copySelection: { PaneFileActions.copy(pane.selectedURLs) },
                                 pasteSelection: { PaneFileActions.paste(into: pane.directory, transfers: transfers) },
                                 deleteSelection: { PaneFileActions.confirmDelete(pane.selectedURLs, transfers: transfers) },
@@ -71,6 +127,7 @@ struct FilePaneView: View {
                     .disabled(pane.selection.isEmpty || other.directory == nil || transfers.deleting)
             }.padding(10)
         }
+        .sheet(item: $restoringServer) { ServerConnectionView(server: $0, pane: pane) }
         .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
         .overlay { if isTargeted { RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 3).allowsHitTesting(false) } }
         .onDrop(of: [UTType.fileURL.identifier, UTType.url.identifier], isTargeted: $isTargeted) { providers in

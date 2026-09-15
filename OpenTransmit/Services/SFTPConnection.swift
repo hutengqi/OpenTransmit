@@ -90,6 +90,7 @@ actor SFTPRegistry: TransferEndpoint {
     private let local = LocalTransferEndpoint()
 
     func connect(_ server: ServerProfile, credentials: SSHCredentials, trustedKey: String?) async throws -> URL {
+        if server.protocolKind == .ftp || server.protocolKind == .ftps { return try await FTPRegistry.shared.connect(server, password: credentials.password) }
         guard server.protocolKind == .sftp else { throw TransferFailure(message: "当前连接仅支持 SFTP。") }
         let connection = try await SFTPConnection.connect(server, credentials: credentials, trustedKey: trustedKey)
         do {
@@ -105,6 +106,7 @@ actor SFTPRegistry: TransferEndpoint {
         } catch { await connection.close(); throw error }
     }
     func disconnect(_ url: URL) async {
+        if url.scheme == "opentransmit-ftp" { await FTPRegistry.shared.disconnect(url); return }
         if let host = url.host, let connection = sessions.removeValue(forKey: host) { await connection.close() }
     }
     /// Frozen UI selection only; directories are removed bottom-up and links are unlinked.
@@ -121,7 +123,8 @@ actor SFTPRegistry: TransferEndpoint {
         }
         for url in roots {
             do {
-                try await deleteTree(url, depth: 0)
+                if url.scheme == "opentransmit-ftp" { try await FTPRegistry.shared.deleteTree(url) }
+                else { try await deleteTree(url, depth: 0) }
                 result.completed.append(url)
             } catch {
                 result.failures.append("\(url.locationLabel)：\(error.transferDescription)（目录可能已部分删除）")
@@ -151,6 +154,7 @@ actor SFTPRegistry: TransferEndpoint {
         return connection
     }
     func children(_ url: URL) async throws -> [FileEntry] {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.children(url) }
         if url.isFileURL { return try await local.children(url) }
         let connection = try connection(url)
         return try await connection.perform { sftp in
@@ -165,6 +169,7 @@ actor SFTPRegistry: TransferEndpoint {
         }
     }
     func entry(_ url: URL) async throws -> FileEntry? {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.entry(url) }
         if url.isFileURL { return try await local.entry(url) }
         // READDIR attributes describe the link itself, unlike STAT, which follows links.
         if url.path == "/" { return FileEntry(url: url, isDirectory: true, size: 0, modified: nil) }
@@ -172,6 +177,7 @@ actor SFTPRegistry: TransferEndpoint {
         catch let status as SFTPMessage.Status where status.errorCode == .noSuchFile { return nil }
     }
     func canonicalIdentity(_ url: URL) async throws -> String {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.canonicalIdentity(url) }
         if url.isFileURL { return try await local.canonicalIdentity(url) }
         let connection = try connection(url)
         let server = connection.server
@@ -179,10 +185,12 @@ actor SFTPRegistry: TransferEndpoint {
         return "sftp:\(server.username)@\(server.host.lowercased()):\(server.port)" + (parent == "/" ? "" : parent) + "/" + url.lastPathComponent
     }
     func createDirectory(_ url: URL) async throws {
+        if url.scheme == "opentransmit-ftp" { try await FTPRegistry.shared.createDirectory(url); return }
         if url.isFileURL { return try await local.createDirectory(url) }
         try await connection(url).perform { try await $0.createDirectory(atPath: url.path) }
     }
     func reader(_ url: URL) async throws -> any TransferReader {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.reader(url) }
         if url.isFileURL { return try await local.reader(url) }
         let sftp = try await connection(url).open()
         do {
@@ -191,6 +199,7 @@ actor SFTPRegistry: TransferEndpoint {
         } catch { try? await sftp.close(); throw error }
     }
     func writer(_ url: URL, replacing: Bool) async throws -> any TransferWriter {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.writer(url, replacing: replacing) }
         if url.isFileURL { return try await local.writer(url, replacing: replacing) }
         return try await SFTPStreamWriter.open(connection: connection(url), target: url, replacing: replacing)
     }

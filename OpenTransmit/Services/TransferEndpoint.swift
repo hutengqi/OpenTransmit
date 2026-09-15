@@ -1,7 +1,7 @@
 import Foundation
 
 extension URL {
-    var isRemoteFile: Bool { scheme == "opentransmit-sftp" }
+    var isRemoteFile: Bool { scheme == "opentransmit-sftp" || scheme == "opentransmit-ftp" }
     var isTransferLocation: Bool { isFileURL || isRemoteFile }
     var locationLabel: String { isFileURL ? path : "\(user ?? "SFTP") · \(path)" }
 }
