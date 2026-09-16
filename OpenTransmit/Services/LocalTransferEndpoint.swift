@@ -10,7 +10,7 @@ struct LocalTransferEndpoint: TransferEndpoint {
                 throw TransferFailure(message: "不支持特殊文件：\(url.lastPathComponent)")
             }
             return FileEntry(url: url, isDirectory: type == .typeDirectory, size: (attributes[.size] as? NSNumber)?.int64Value ?? 0,
-                             modified: attributes[.modificationDate] as? Date, isSymbolicLink: type == .typeSymbolicLink)
+                             modified: attributes[.modificationDate] as? Date, isSymbolicLink: type == .typeSymbolicLink, permissions: (attributes[.posixPermissions] as? NSNumber)?.uint32Value)
         } catch let e as CocoaError where e.code == .fileReadNoSuchFile || e.code == .fileNoSuchFile { return nil }
     }
     func children(_ url: URL) async throws -> [FileEntry] {
@@ -22,6 +22,12 @@ struct LocalTransferEndpoint: TransferEndpoint {
     }
     func canonicalIdentity(_ url: URL) async throws -> String { "local:" + url.resolvingSymlinksInPath().standardizedFileURL.path }
     func createDirectory(_ url: URL) async throws { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
+    func applyMetadata(_ entry: FileEntry, to url: URL) async throws {
+        var attributes: [FileAttributeKey: Any] = [:]
+        if let date = entry.modified { attributes[.modificationDate] = date }
+        if let permissions = entry.permissions { attributes[.posixPermissions] = permissions & 0o777 }
+        try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+    }
     func reader(_ url: URL) async throws -> any TransferReader { try LocalStreamReader(url) }
     func writer(_ url: URL, replacing: Bool) async throws -> any TransferWriter { try LocalStreamWriter(url, replacing: replacing) }
 }

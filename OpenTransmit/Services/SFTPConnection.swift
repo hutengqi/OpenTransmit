@@ -105,6 +105,17 @@ actor SFTPRegistry: TransferEndpoint {
             return url
         } catch { await connection.close(); throw error }
     }
+    func profile(for url: URL) async throws -> ServerProfile {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.profile(for: url) }
+        return try connection(url).server
+    }
+    func activeLocation(for server: ServerProfile, path: String) async -> URL? {
+        if server.protocolKind == .ftp || server.protocolKind == .ftps { return await FTPRegistry.shared.activeLocation(for: server, path: path) }
+        guard let session = sessions.first(where: { $0.value.server.matchesEndpoint(server) }) else { return nil }
+        var parts = URLComponents()
+        parts.scheme = "opentransmit-sftp"; parts.host = session.key; parts.user = server.name; parts.path = path
+        return parts.url
+    }
     func disconnect(_ url: URL) async {
         if url.scheme == "opentransmit-ftp" { await FTPRegistry.shared.disconnect(url); return }
         if let host = url.host, let connection = sessions.removeValue(forKey: host) { await connection.close() }
@@ -164,7 +175,7 @@ actor SFTPRegistry: TransferEndpoint {
                 let mode = (child.attributes.permissions ?? 0) & 0o170000
                 return FileEntry(url: url.appendingPathComponent(child.filename), isDirectory: mode == 0o040000,
                                  size: Int64(clamping: child.attributes.size ?? 0), modified: child.attributes.accessModificationTime?.modificationTime,
-                                 isSymbolicLink: mode != 0o100000 && mode != 0o040000)
+                                 isSymbolicLink: mode != 0o100000 && mode != 0o040000, permissions: child.attributes.permissions.map { $0 & 0o777 })
             }
         }
     }
@@ -209,6 +220,20 @@ actor SFTPRegistry: TransferEndpoint {
         } else {
             try await connection(source).perform { try await $0.rename(at: source.path, to: target.path) }
         }
+    }
+    func applyMetadata(_ entry: FileEntry, to url: URL) async throws {
+        if url.isFileURL { try await local.applyMetadata(entry, to: url); return }
+        if url.scheme == "opentransmit-ftp" { try await FTPRegistry.shared.applyMetadata(entry, to: url); return }
+        var attributes = SFTPFileAttributes()
+        attributes.permissions = entry.permissions.map { $0 & 0o777 }
+        if let modified = entry.modified {
+            guard modified.timeIntervalSince1970 >= 0, modified.timeIntervalSince1970 <= Double(UInt32.max) else {
+                throw TransferFailure(message: "修改时间超出 SFTP v3 支持范围。")
+            }
+            attributes.accessModificationTime = .init(accessTime: modified, modificationTime: modified)
+        }
+        let metadata = attributes
+        try await connection(url).perform { try await $0.setAttributes(at: url.path, to: metadata) }
     }
     func reader(_ url: URL) async throws -> any TransferReader {
         if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.reader(url) }

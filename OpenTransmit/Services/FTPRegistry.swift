@@ -24,6 +24,13 @@ actor FTPRegistry: TransferEndpoint {
         }
         try await connection(source).command("RNFR", path: source.path, to: target.path)
     }
+    func profile(for url: URL) throws -> ServerProfile { try connection(url).server }
+    func activeLocation(for server: ServerProfile, path: String) -> URL? {
+        guard let session = sessions.first(where: { $0.value.server.matchesEndpoint(server) }) else { return nil }
+        var parts = URLComponents()
+        parts.scheme = "opentransmit-ftp"; parts.host = session.key; parts.user = server.name; parts.path = path
+        return parts.url
+    }
     func disconnect(_ url: URL) { if let host = url.host { sessions.removeValue(forKey: host) } }
     private func connection(_ url: URL) throws -> FTPConnection {
         guard url.scheme == "opentransmit-ftp", let host = url.host, let connection = sessions[host] else {
@@ -43,6 +50,16 @@ actor FTPRegistry: TransferEndpoint {
         return "ftp:\(server.username)@\(server.host.lowercased()):\(server.port)\(url.path)"
     }
     func createDirectory(_ url: URL) async throws { try await connection(url).command("MKD", path: url.path) }
+    func applyMetadata(_ entry: FileEntry, to url: URL) async throws {
+        if let modified = entry.modified {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyyMMddHHmmss"
+            try await connection(url).command("MFMT " + formatter.string(from: modified), path: url.path)
+        }
+        if entry.permissions != nil { throw TransferFailure(message: "FTP 不保证 POSIX 权限保留。") }
+    }
     func reader(_ url: URL) async throws -> any TransferReader {
         let scratch = try FTPScratch()
         try await connection(url).request(path: url.path, mode: 1, file: scratch.file)

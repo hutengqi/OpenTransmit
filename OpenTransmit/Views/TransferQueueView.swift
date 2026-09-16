@@ -11,6 +11,20 @@ struct TransferQueueView: View {
                 if store.running { ProgressView().controlSize(.small); Button("取消全部", role: .destructive) { store.cancel() } }
                 Button("清除已结束") { store.jobs.removeAll { $0.finished } }.disabled(store.running || store.jobs.isEmpty)
             }.padding(12)
+            if let message = store.recoveryMessage { Text(message).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
+            if !store.orphanedTasks.isEmpty {
+                HStack {
+                    Text("\(store.orphanedTasks.count) 项可恢复任务（从头重新执行）").font(.caption)
+                    Menu("恢复任务") {
+                        ForEach(store.orphanedTasks) { saved in
+                            Menu("\((saved.source.path as NSString).lastPathComponent) → \(saved.destination.path)") {
+                                Button("从头重新执行") { store.recover(saved) }
+                                Button("移除任务记录", role: .destructive) { store.savedTasks.removeAll { $0.id == saved.id } }
+                            }
+                        }
+                    }.disabled(store.deleting)
+                }
+            }
             if store.jobs.isEmpty {
                 Text("将文件拖到另一栏，或选中文件后点击“复制到另一栏”")
                     .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -24,13 +38,27 @@ struct TransferQueueView: View {
                             Text("→ \(job.destination.locationLabel)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()
-                        Text(ByteCountFormatter.string(fromByteCount: job.bytes, countStyle: .file)).monospacedDigit().foregroundStyle(.secondary)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            if let fraction = job.fraction {
+                                ProgressView(value: fraction).frame(width: 120)
+                                Text("\(Int(fraction * 100))% · \(ByteCountFormatter.string(fromByteCount: job.bytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: job.totalBytes ?? 0, countStyle: .file))")
+                                    .font(.caption).monospacedDigit()
+                            }
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                Text("平均处理 \(ByteCountFormatter.string(fromByteCount: Int64(min(Double(Int64.max / 2), job.bytesPerSecond(at: context.date))), countStyle: .file))/秒")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }.help("按逻辑文件内容统计；FTP 暂存与提交阶段不等同于网络速度。提交完成前最多显示 99%。")
+                        if !job.warnings.isEmpty {
+                            Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                                .help(job.warnings.joined(separator: "\n"))
+                        }
                         Text(job.status).font(.caption).lineLimit(2).frame(maxWidth: 250, alignment: .trailing)
-                        if job.failed { Button("重试") { store.retry(job) } }
+                        if job.failed || job.cancelled { Button("重新执行") { store.retry(job) } }
                     }
                 }.listStyle(.plain)
             }
-        }.frame(height: 180)
+        }.frame(height: 220)
     }
 }
 

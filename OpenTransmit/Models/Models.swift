@@ -43,6 +43,7 @@ struct FileEntry: Identifiable, Sendable, Equatable {
     let size: Int64
     let modified: Date?
     var isSymbolicLink = false
+    var permissions: UInt32? = nil
     var id: URL { url }
     var name: String { url.lastPathComponent }
 }
@@ -60,8 +61,24 @@ struct TransferJob: Identifiable {
     let source: URL
     let destination: URL
     var duplicateInPlace = false
+    var recoveryID: UUID?
     var status = "等待中"
     var bytes: Int64 = 0
+    var totalBytes: Int64?
+    var startedAt: Date?
+    var endedAt: Date?
+    var cancelled = false
+    var warnings: [String] = []
+    var fraction: Double? {
+        guard let totalBytes else { return nil }
+        if finished && !failed && !cancelled { return 1 }
+        guard totalBytes > 0 else { return 0 }
+        return min(0.99, Double(bytes) / Double(totalBytes))
+    }
+    func bytesPerSecond(at now: Date) -> Double {
+        guard let startedAt else { return 0 }
+        return Double(bytes) / max(0.001, (endedAt ?? now).timeIntervalSince(startedAt))
+    }
     var finished = false
     var failed = false
 }

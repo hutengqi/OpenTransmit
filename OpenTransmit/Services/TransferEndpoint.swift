@@ -25,8 +25,13 @@ protocol TransferEndpoint: Sendable {
     func children(_ url: URL) async throws -> [FileEntry]
     func canonicalIdentity(_ url: URL) async throws -> String
     func createDirectory(_ url: URL) async throws
+    func applyMetadata(_ entry: FileEntry, to url: URL) async throws
     func reader(_ url: URL) async throws -> any TransferReader
     func writer(_ url: URL, replacing: Bool) async throws -> any TransferWriter
+}
+
+extension TransferEndpoint {
+    func applyMetadata(_ entry: FileEntry, to url: URL) async throws {}
 }
 
 /// Endpoint-neutral recursive transfer. At most one 64 KiB payload is in flight.
@@ -34,9 +39,26 @@ actor EndpointTransferEngine {
     let endpoint: any TransferEndpoint
     init(endpoint: any TransferEndpoint) { self.endpoint = endpoint }
 
+    func totalBytes(_ source: URL, depth: Int = 0) async throws -> Int64 {
+        try Task.checkCancellation()
+        guard depth < 128, let item = try await endpoint.entry(source), !item.isSymbolicLink else {
+            throw TransferFailure(message: "无法统计源项目，可能不存在、为符号链接或层级过深。")
+        }
+        if !item.isDirectory { return max(0, item.size) }
+        var total: Int64 = 0
+        for child in try await endpoint.children(source) {
+            let count = try await totalBytes(child.url, depth: depth + 1)
+            let sum = total.addingReportingOverflow(count)
+            guard !sum.overflow else { throw TransferFailure(message: "目录大小超过支持范围。") }
+            total = sum.partialValue
+        }
+        return total
+    }
+
     func copy(_ source: URL, into directory: URL, duplicateInPlace: Bool = false,
               conflict: @Sendable (FileConflict) async -> ConflictChoice,
-              progress: @Sendable (Int64) async -> Void) async throws -> Bool {
+              progress: @Sendable (Int64) async -> Void,
+              warning: @Sendable (String) async -> Void = { _ in }) async throws -> Bool {
         try Task.checkCancellation()
         guard source.isTransferLocation, directory.isTransferLocation,
               !source.lastPathComponent.isEmpty, source.lastPathComponent != "/",
@@ -52,12 +74,13 @@ actor EndpointTransferEngine {
         else if sourceIdentity == targetIdentity || targetIdentity.hasPrefix(sourceIdentity + "/") {
             throw TransferFailure(message: "不能将项目传输到自身或其子目录。")
         }
-        return try await copyItem(item, to: target, depth: 0, conflict: conflict, progress: progress)
+        return try await copyItem(item, to: target, depth: 0, conflict: conflict, progress: progress, warning: warning)
     }
 
     private func copyItem(_ item: FileEntry, to requested: URL, depth: Int,
                           conflict: @Sendable (FileConflict) async -> ConflictChoice,
-                          progress: @Sendable (Int64) async -> Void) async throws -> Bool {
+                          progress: @Sendable (Int64) async -> Void,
+                          warning: @Sendable (String) async -> Void) async throws -> Bool {
         try Task.checkCancellation()
         guard depth < 128, !item.isSymbolicLink else { throw TransferFailure(message: "目录层级过深或包含符号链接：\(item.name)") }
         var target = requested
@@ -77,15 +100,17 @@ actor EndpointTransferEngine {
         }
         try Task.checkCancellation()
         if item.isDirectory {
-            if try await endpoint.entry(target) == nil { try await endpoint.createDirectory(target) }
+            let created = try await endpoint.entry(target) == nil
+            if created { try await endpoint.createDirectory(target) }
             var complete = true
             for child in try await endpoint.children(item.url) {
                 guard child.name != ".", child.name != "..", !child.name.contains("/"), !child.name.contains("\0") else {
                     throw TransferFailure(message: "服务器返回了无效文件名。")
                 }
-                let copied = try await copyItem(child, to: target.appendingPathComponent(child.name), depth: depth + 1, conflict: conflict, progress: progress)
+                let copied = try await copyItem(child, to: target.appendingPathComponent(child.name), depth: depth + 1, conflict: conflict, progress: progress, warning: warning)
                 complete = copied && complete
             }
+            if created { await preserve(item, at: target, warning: warning) }
             return complete
         }
         let input = try await endpoint.reader(item.url)
@@ -105,6 +130,7 @@ actor EndpointTransferEngine {
                 try Task.checkCancellation()
                 try await output.commit()
                 await input.close()
+                await preserve(item, at: target, warning: warning)
                 return true
             } catch {
                 await output.abort()
@@ -114,6 +140,10 @@ actor EndpointTransferEngine {
             await input.close()
             throw error
         }
+    }
+    private func preserve(_ item: FileEntry, at target: URL, warning: @Sendable (String) async -> Void) async {
+        do { try await endpoint.applyMetadata(item, to: target) }
+        catch { await warning("\(target.path)：内容已复制，但元数据未完整保留（\(error.localizedDescription)）") }
     }
     private func unique(_ target: URL) async throws -> URL {
         let ext = target.pathExtension
