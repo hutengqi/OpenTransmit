@@ -9,6 +9,7 @@ struct ContentView: View {
     private var right: PaneStore { activeTab.right }
     @State private var transfers = TransferStore()
     @State private var showServer = false
+    @State private var comparison: DirectoryComparisonRequest?
     @State private var editingServer: ServerProfile?
     @State private var workspaceDirection: TransferDirection = .unspecified
     @State private var showWorkspace = false
@@ -91,10 +92,16 @@ struct ContentView: View {
                 Button("保存工作区", systemImage: "bookmark") { beginSave(activeTab.id) }
                     .disabled(left.directory == nil || right.directory == nil)
                     .help("保存左右栏的本地目录或服务器位置")
+                Button("比较目录…", systemImage: "arrow.left.arrow.right") {
+                    if let a = left.directory, let b = right.directory {
+                        comparison = DirectoryComparisonRequest(left: a, right: b)
+                    }
+                }.disabled(left.directory == nil || right.directory == nil || left.loading || right.loading || transfers.running || transfers.deleting)
                 Button("刷新两栏", systemImage: "arrow.clockwise") { left.refresh(); right.refresh() }
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
+        .sheet(item: $comparison) { DirectoryComparisonView(request: $0, transfers: transfers) }
         .sheet(item: $connectingServer) { ServerConnectionView(server: $0, pane: connectLeft ? left : right) }
         .sheet(item: $editingServer) { ServerEditorView(library: library, server: $0) }
         .sheet(isPresented: $showServer) { ServerEditorView(library: library) }

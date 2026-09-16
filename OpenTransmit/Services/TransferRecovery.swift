@@ -30,6 +30,7 @@ struct SavedTransferTask: Identifiable, Codable {
     let source: SavedTransferLocation
     let destination: SavedTransferLocation
     let duplicateInPlace: Bool
+    var moving: Bool? = nil
 }
 
 extension ServerProfile {

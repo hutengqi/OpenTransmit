@@ -50,6 +50,10 @@ actor FTPRegistry: TransferEndpoint {
         return "ftp:\(server.username)@\(server.host.lowercased()):\(server.port)\(url.path)"
     }
     func createDirectory(_ url: URL) async throws { try await connection(url).command("MKD", path: url.path) }
+    func removeMovedSource(_ item: FileEntry) async throws {
+        try await validateMovedSource(item)
+        try await connection(item.url).command(item.isDirectory ? "RMD" : "DELE", path: item.url.path)
+    }
     func applyMetadata(_ entry: FileEntry, to url: URL) async throws {
         if let modified = entry.modified {
             let formatter = DateFormatter()

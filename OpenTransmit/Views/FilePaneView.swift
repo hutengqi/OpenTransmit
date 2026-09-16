@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct FilePaneView: View {
     let title: String
@@ -8,7 +7,6 @@ struct FilePaneView: View {
     let transfers: TransferStore
     let servers: [ServerProfile]
     let addServer: () -> Void
-    @State private var isTargeted = false
     @State private var editing: FileEditRequest?
     @State private var restoringServer: ServerProfile?
 
@@ -69,22 +67,7 @@ struct FilePaneView: View {
                     .onChange(of: pane.searchQuery) { _, _ in
                         pane.selection.formIntersection(Set(pane.visibleEntries.map(\.url)))
                     }
-                Menu {
-                    Picker("排序依据", selection: $pane.sort) {
-                        ForEach(FileSort.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    Toggle("升序", isOn: $pane.ascending)
-                    Toggle("文件夹优先", isOn: $pane.foldersFirst)
-                } label: { Label("排序", systemImage: "arrow.up.arrow.down") }
-                Menu {
-                    Button("新建目录…") {
-                        if let directory = pane.directory { editing = FileEditRequest(kind: .createDirectory, location: directory) }
-                    }.disabled(pane.directory == nil)
-                    Button("重命名…") {
-                        if let url = pane.selectedURLs.first { editing = FileEditRequest(kind: .rename, location: url) }
-                    }.disabled(pane.selectedURLs.count != 1)
-                } label: { Label("文件操作", systemImage: "ellipsis.circle") }
-                .disabled(pane.loading || transfers.running || transfers.deleting)
+
             }.padding(.horizontal, 12).padding(.bottom, 10)
             HStack(spacing: 12) {
                 Button("复制", systemImage: "doc.on.doc") { PaneFileActions.copy(pane.selectedURLs) }
@@ -141,10 +124,15 @@ struct FilePaneView: View {
                                 pasteSelection: { PaneFileActions.paste(into: pane.directory, transfers: transfers) },
                                 deleteSelection: { PaneFileActions.confirmDelete(pane.selectedURLs, transfers: transfers) },
                                 copyToOther: { copy(pane.selection) },
-                                receive: { urls in
-                                    if let directory = pane.directory { transfers.enqueue(urls, to: directory) }
+                                receive: { urls, folder, moving in
+                                    if let directory = folder ?? pane.directory { transfers.enqueue(urls, to: directory, moving: moving) }
                                 }, canCopy: other.directory != nil && !transfers.deleting,
-                                canPaste: !transfers.deleting, canDelete: !transfers.running && !transfers.deleting)
+                                canPaste: !pane.loading && !transfers.deleting, canDelete: !transfers.running && !transfers.deleting,
+                                sort: $pane.sort, ascending: $pane.ascending, foldersFirst: $pane.foldersFirst,
+                                canEdit: !pane.loading && !transfers.running && !transfers.deleting,
+                                createDirectory: {
+                                    if let directory = pane.directory { editing = FileEditRequest(kind: .createDirectory, location: directory) }
+                                }, rename: { url in editing = FileEditRequest(kind: .rename, location: url) })
                 .overlay { if pane.visibleEntries.isEmpty && !pane.loading { Text(pane.searchQuery.isEmpty ? "此目录为空" : "没有匹配的项目").foregroundStyle(.secondary).allowsHitTesting(false) } }
             }
             Divider()
@@ -167,23 +155,7 @@ struct FilePaneView: View {
         }
         .sheet(item: $restoringServer) { ServerConnectionView(server: $0, pane: pane) }
         .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
-        .overlay { if isTargeted { RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 3).allowsHitTesting(false) } }
-        .onDrop(of: [UTType.fileURL.identifier, UTType.url.identifier], isTargeted: $isTargeted) { providers in
-            guard let directory = pane.directory else { return false }
-            Task { @MainActor in
-                var urls: [URL] = []
-                for provider in providers {
-                    let url: URL? = await withCheckedContinuation { continuation in
-                        _ = provider.loadObject(ofClass: NSURL.self) { object, _ in
-                            continuation.resume(returning: object as? URL)
-                        }
-                    }
-                    if let url, url.isTransferLocation { urls.append(url) }
-                }
-                transfers.enqueue(urls, to: directory)
-            }
-            return true
-        }
+
     }
     private func copy(_ selected: Set<URL>) {
         guard let target = other.directory else { return }

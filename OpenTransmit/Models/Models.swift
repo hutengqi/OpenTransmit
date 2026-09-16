@@ -61,6 +61,7 @@ struct TransferJob: Identifiable {
     let source: URL
     let destination: URL
     var duplicateInPlace = false
+    var moving = false
     var recoveryID: UUID?
     var status = "等待中"
     var bytes: Int64 = 0
@@ -81,4 +82,11 @@ struct TransferJob: Identifiable {
     }
     var finished = false
     var failed = false
+}
+
+extension FileEntry {
+    /// Finder metadata and AppleDouble sidecars; ordinary dotfiles remain transferable.
+    var isSystemMetadata: Bool {
+        !isDirectory && (name == ".DS_Store" || name == ".localized" || name.hasPrefix("._"))
+    }
 }

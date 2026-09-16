@@ -29,7 +29,7 @@ import Observation
                 let source = try await saved.source.resolve()
                 let destination = try await saved.destination.resolve()
                 guard !deleting else { return }
-                enqueue([source], to: destination, duplicateInPlace: saved.duplicateInPlace, recoveryID: saved.id)
+                enqueue([source], to: destination, duplicateInPlace: saved.duplicateInPlace, moving: saved.moving ?? false, recoveryID: saved.id)
                 recoveryMessage = nil
             } catch { recoveryMessage = error.transferDescription }
         }
@@ -40,7 +40,7 @@ import Observation
                 let source = try await SavedTransferLocation.capture(job.source)
                 let destination = try await SavedTransferLocation.capture(job.destination)
                 if jobs.contains(where: { $0.id == job.id && (!$0.finished || $0.failed || $0.cancelled) }), !savedTasks.contains(where: { $0.id == job.id }) {
-                    savedTasks.append(SavedTransferTask(id: job.id, source: source, destination: destination, duplicateInPlace: job.duplicateInPlace))
+                    savedTasks.append(SavedTransferTask(id: job.id, source: source, destination: destination, duplicateInPlace: job.duplicateInPlace, moving: job.moving))
                 }
             } catch { recoveryMessage = "部分任务无法持久化，退出后不能恢复：\(error.transferDescription)" }
         }
@@ -62,11 +62,11 @@ import Observation
         if rename { try await SFTPRegistry.shared.renameItem(location, name: name) }
         else { try await SFTPRegistry.shared.createNamedDirectory(in: location, name: name) }
     }
-    func enqueue(_ urls: [URL], to destination: URL, duplicateInPlace: Bool = false, recoveryID: UUID? = nil) {
+    func enqueue(_ urls: [URL], to destination: URL, duplicateInPlace: Bool = false, moving: Bool = false, recoveryID: UUID? = nil) {
         guard !deleting else { return }
         for source in urls where source.isTransferLocation {
             if source.isFileURL { _ = source.startAccessingSecurityScopedResource() }
-            jobs.append(TransferJob(source: source, destination: destination, duplicateInPlace: duplicateInPlace, recoveryID: recoveryID))
+            jobs.append(TransferJob(source: source, destination: destination, duplicateInPlace: duplicateInPlace, moving: moving, recoveryID: recoveryID))
         }
         Task { await savePendingTasks() }
         guard !running, jobs.contains(where: { !$0.finished }) else { return }
@@ -90,8 +90,8 @@ import Observation
                 }
                 jobs[index].totalBytes = try await remoteEngine.totalBytes(job.source)
                 jobs[index].startedAt = Date()
-                jobs[index].status = "传输与提交中"
-                let complete = try await remoteEngine.copy(job.source, into: job.destination, duplicateInPlace: job.duplicateInPlace, conflict: decide, progress: progress, warning: { [weak self] warning in
+                jobs[index].status = job.moving ? "移动中（写入后移除源文件）" : "传输与提交中"
+                let complete = try await remoteEngine.copy(job.source, into: job.destination, duplicateInPlace: job.duplicateInPlace, moving: job.moving, conflict: decide, progress: progress, warning: { [weak self] warning in
                     await self?.addWarning(warning, id: job.id)
                 })
                 jobs[index].status = complete ? "已完成" : "已完成（含跳过）"
@@ -147,6 +147,6 @@ import Observation
     func retry(_ job: TransferJob) {
         guard !deleting else { return }
         if let saved = savedTasks.first(where: { $0.id == job.id || $0.id == job.recoveryID }) { recover(saved) }
-        else { enqueue([job.source], to: job.destination, duplicateInPlace: job.duplicateInPlace) }
+        else { enqueue([job.source], to: job.destination, duplicateInPlace: job.duplicateInPlace, moving: job.moving) }
     }
 }

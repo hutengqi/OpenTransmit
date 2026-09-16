@@ -221,6 +221,14 @@ actor SFTPRegistry: TransferEndpoint {
             try await connection(source).perform { try await $0.rename(at: source.path, to: target.path) }
         }
     }
+    func removeMovedSource(_ item: FileEntry) async throws {
+        if item.url.isFileURL { return try await local.removeMovedSource(item) }
+        if item.url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.removeMovedSource(item) }
+        try await validateMovedSource(item)
+        let session = try connection(item.url)
+        if item.isDirectory { try await session.perform { try await $0.rmdir(at: item.url.path) } }
+        else { try await session.perform { try await $0.remove(at: item.url.path) } }
+    }
     func applyMetadata(_ entry: FileEntry, to url: URL) async throws {
         if url.isFileURL { try await local.applyMetadata(entry, to: url); return }
         if url.scheme == "opentransmit-ftp" { try await FTPRegistry.shared.applyMetadata(entry, to: url); return }

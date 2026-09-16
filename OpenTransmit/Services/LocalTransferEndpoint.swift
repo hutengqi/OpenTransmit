@@ -22,6 +22,11 @@ struct LocalTransferEndpoint: TransferEndpoint {
     }
     func canonicalIdentity(_ url: URL) async throws -> String { "local:" + url.resolvingSymlinksInPath().standardizedFileURL.path }
     func createDirectory(_ url: URL) async throws { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
+    func removeMovedSource(_ item: FileEntry) async throws {
+        try await validateMovedSource(item)
+        let result = item.url.path.withCString { path in item.isDirectory ? Darwin.rmdir(path) : Darwin.unlink(path) }
+        guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+    }
     func applyMetadata(_ entry: FileEntry, to url: URL) async throws {
         var attributes: [FileAttributeKey: Any] = [:]
         if let date = entry.modified { attributes[.modificationDate] = date }

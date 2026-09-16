@@ -17,7 +17,7 @@ struct TransferQueueView: View {
                     Text("\(store.orphanedTasks.count) 项可恢复任务（从头重新执行）").font(.caption)
                     Menu("恢复任务") {
                         ForEach(store.orphanedTasks) { saved in
-                            Menu("\((saved.source.path as NSString).lastPathComponent) → \(saved.destination.path)") {
+                            Menu("\(saved.moving == true ? "移动 · " : "复制 · ")\((saved.source.path as NSString).lastPathComponent) → \(saved.destination.path)") {
                                 Button("从头重新执行") { store.recover(saved) }
                                 Button("移除任务记录", role: .destructive) { store.savedTasks.removeAll { $0.id == saved.id } }
                             }
@@ -34,7 +34,7 @@ struct TransferQueueView: View {
                         Image(systemName: job.failed ? "exclamationmark.circle" : job.finished ? "checkmark.circle" : "arrow.right.circle")
                             .foregroundStyle(job.failed ? Color.red : Color.secondary)
                         VStack(alignment: .leading) {
-                            Text(job.source.lastPathComponent).lineLimit(1)
+                            Text("\(job.moving ? "移动" : "复制") · \(job.source.lastPathComponent)").lineLimit(1)
                             Text("→ \(job.destination.locationLabel)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()
