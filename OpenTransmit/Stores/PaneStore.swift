@@ -11,6 +11,11 @@ import Observation
     var entries: [FileEntry] = []
     var selection: Set<URL> = []
     var showHidden = false
+    var searchQuery = ""
+    var sort: FileSort = .name
+    var ascending = true
+    var foldersFirst = true
+    var visibleEntries: [FileEntry] { DirectoryListing.entries(entries, query: searchQuery, sort: sort, ascending: ascending, foldersFirst: foldersFirst) }
     var loading = false
     var error: String?
     private var accessRoots: [URL] = []
@@ -18,7 +23,7 @@ import Observation
     private var generation = UUID()
     private let service = LocalFileService()
 
-    var selectedURLs: [URL] { entries.filter { selection.contains($0.id) }.map(\.url) }
+    var selectedURLs: [URL] { visibleEntries.filter { selection.contains($0.id) }.map(\.url) }
     var canGoBack: Bool { !history.isEmpty }
     /// All sources expose their full ancestor chain, independently of local access grants.
     var breadcrumbURLs: [URL] {
@@ -124,6 +129,7 @@ import Observation
         }
         if recordHistory, let directory { history.append(directory) }
         directory = url
+        searchQuery = ""
         selection = []
         refresh()
     }

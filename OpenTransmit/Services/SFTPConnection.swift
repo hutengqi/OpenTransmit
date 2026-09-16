@@ -189,6 +189,27 @@ actor SFTPRegistry: TransferEndpoint {
         if url.isFileURL { return try await local.createDirectory(url) }
         try await connection(url).perform { try await $0.createDirectory(atPath: url.path) }
     }
+    func createNamedDirectory(in directory: URL, name: String) async throws {
+        try DirectoryListing.validateName(name)
+        let target = directory.appendingPathComponent(name)
+        guard try await entry(target) == nil else { throw TransferFailure(message: "已有同名项目，未创建目录。") }
+        try await createDirectory(target)
+    }
+    func renameItem(_ source: URL, name: String) async throws {
+        try DirectoryListing.validateName(name)
+        guard source.path != "/", !source.lastPathComponent.isEmpty else { throw TransferFailure(message: "不能重命名根目录。") }
+        if source.lastPathComponent == name { return }
+        let target = source.deletingLastPathComponent().appendingPathComponent(name)
+        guard try await entry(source) != nil else { throw TransferFailure(message: "源项目已不存在。") }
+        guard try await entry(target) == nil else { throw TransferFailure(message: "已有同名项目，未执行重命名。") }
+        if source.isFileURL {
+            try FileManager.default.moveItem(at: source, to: target)
+        } else if source.scheme == "opentransmit-ftp" {
+            try await FTPRegistry.shared.renameItem(source, to: target)
+        } else {
+            try await connection(source).perform { try await $0.rename(at: source.path, to: target.path) }
+        }
+    }
     func reader(_ url: URL) async throws -> any TransferReader {
         if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.reader(url) }
         if url.isFileURL { return try await local.reader(url) }

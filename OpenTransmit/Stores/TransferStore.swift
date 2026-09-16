@@ -14,6 +14,13 @@ import Observation
     private let remoteEngine = EndpointTransferEngine(endpoint: SFTPRegistry.shared)
     var onChange: (() -> Void)?
 
+    func editItem(at location: URL, name: String, rename: Bool) async throws {
+        guard !running, !deleting else { throw TransferFailure(message: "请等待传输或文件操作结束。") }
+        deleting = true
+        defer { deleting = false; onChange?() }
+        if rename { try await SFTPRegistry.shared.renameItem(location, name: name) }
+        else { try await SFTPRegistry.shared.createNamedDirectory(in: location, name: name) }
+    }
     func enqueue(_ urls: [URL], to destination: URL, duplicateInPlace: Bool = false) {
         guard !deleting else { return }
         for source in urls where source.isTransferLocation {

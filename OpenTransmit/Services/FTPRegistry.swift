@@ -18,6 +18,12 @@ actor FTPRegistry: TransferEndpoint {
         sessions[url.host!] = connection
         return url
     }
+    func renameItem(_ source: URL, to target: URL) async throws {
+        guard source.host == target.host, source.deletingLastPathComponent() == target.deletingLastPathComponent() else {
+            throw TransferFailure(message: "仅支持在同一目录内重命名。")
+        }
+        try await connection(source).command("RNFR", path: source.path, to: target.path)
+    }
     func disconnect(_ url: URL) { if let host = url.host { sessions.removeValue(forKey: host) } }
     private func connection(_ url: URL) throws -> FTPConnection {
         guard url.scheme == "opentransmit-ftp", let host = url.host, let connection = sessions[host] else {

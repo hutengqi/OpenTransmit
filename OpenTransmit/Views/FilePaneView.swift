@@ -9,6 +9,7 @@ struct FilePaneView: View {
     let servers: [ServerProfile]
     let addServer: () -> Void
     @State private var isTargeted = false
+    @State private var editing: FileEditRequest?
     @State private var restoringServer: ServerProfile?
 
     var body: some View {
@@ -56,7 +57,34 @@ struct FilePaneView: View {
                     Text("请选择本地目录或服务器开始浏览").font(.callout)
                 }
                 Spacer(minLength: 0)
+                if let directory = pane.directory {
+                    Button("输入路径…", systemImage: "pencil") { editing = FileEditRequest(kind: .path, location: directory) }
+                        .labelStyle(.iconOnly)
+                }
                 if pane.loading { ProgressView().controlSize(.small) }
+            }.padding(.horizontal, 12).padding(.bottom, 10)
+            HStack(spacing: 8) {
+                TextField("查找当前目录中的名称", text: $pane.searchQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: pane.searchQuery) { _, _ in
+                        pane.selection.formIntersection(Set(pane.visibleEntries.map(\.url)))
+                    }
+                Menu {
+                    Picker("排序依据", selection: $pane.sort) {
+                        ForEach(FileSort.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Toggle("升序", isOn: $pane.ascending)
+                    Toggle("文件夹优先", isOn: $pane.foldersFirst)
+                } label: { Label("排序", systemImage: "arrow.up.arrow.down") }
+                Menu {
+                    Button("新建目录…") {
+                        if let directory = pane.directory { editing = FileEditRequest(kind: .createDirectory, location: directory) }
+                    }.disabled(pane.directory == nil)
+                    Button("重命名…") {
+                        if let url = pane.selectedURLs.first { editing = FileEditRequest(kind: .rename, location: url) }
+                    }.disabled(pane.selectedURLs.count != 1)
+                } label: { Label("文件操作", systemImage: "ellipsis.circle") }
+                .disabled(pane.loading || transfers.running || transfers.deleting)
             }.padding(.horizontal, 12).padding(.bottom, 10)
             HStack(spacing: 12) {
                 Button("复制", systemImage: "doc.on.doc") { PaneFileActions.copy(pane.selectedURLs) }
@@ -108,7 +136,7 @@ struct FilePaneView: View {
                 ContentUnavailableView("无法读取目录", systemImage: "exclamationmark.folder", description: Text(error))
                     .frame(maxHeight: .infinity)
             } else {
-                NativeFileTable(entries: pane.entries, canGoUp: pane.canGoUp, goUp: { pane.up() }, selection: $pane.selection,
+                NativeFileTable(entries: pane.visibleEntries, canGoUp: pane.canGoUp, goUp: { pane.up() }, selection: $pane.selection,
                                 open: { pane.navigate($0) }, copySelection: { PaneFileActions.copy(pane.selectedURLs) },
                                 pasteSelection: { PaneFileActions.paste(into: pane.directory, transfers: transfers) },
                                 deleteSelection: { PaneFileActions.confirmDelete(pane.selectedURLs, transfers: transfers) },
@@ -117,15 +145,25 @@ struct FilePaneView: View {
                                     if let directory = pane.directory { transfers.enqueue(urls, to: directory) }
                                 }, canCopy: other.directory != nil && !transfers.deleting,
                                 canPaste: !transfers.deleting, canDelete: !transfers.running && !transfers.deleting)
-                .overlay { if pane.entries.isEmpty && !pane.loading { Text("此目录为空").foregroundStyle(.secondary).allowsHitTesting(false) } }
+                .overlay { if pane.visibleEntries.isEmpty && !pane.loading { Text(pane.searchQuery.isEmpty ? "此目录为空" : "没有匹配的项目").foregroundStyle(.secondary).allowsHitTesting(false) } }
             }
             Divider()
             HStack {
-                Text("\(pane.entries.count) 个项目 · 已选 \(pane.selection.count) 项").font(.caption).foregroundStyle(.secondary)
+                Text("\(pane.visibleEntries.count) / \(pane.entries.count) 个项目 · 已选 \(pane.selection.count) 项").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("复制到另一栏", systemImage: title == "左栏" ? "arrow.right" : "arrow.left") { copy(pane.selection) }
                     .disabled(pane.selection.isEmpty || other.directory == nil || transfers.deleting)
             }.padding(10)
+        }
+        .sheet(item: $editing) { request in
+            FileNameSheet(request: request) { name in
+                if request.kind == .path {
+                    let destination = try DirectoryListing.location(name, relativeTo: request.location)
+                    pane.navigate(destination)
+                } else {
+                    try await transfers.editItem(at: request.location, name: name, rename: request.kind == .rename)
+                }
+            }
         }
         .sheet(item: $restoringServer) { ServerConnectionView(server: $0, pane: pane) }
         .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
@@ -149,6 +187,6 @@ struct FilePaneView: View {
     }
     private func copy(_ selected: Set<URL>) {
         guard let target = other.directory else { return }
-        transfers.enqueue(pane.entries.filter { selected.contains($0.id) }.map(\.url), to: target)
+        transfers.enqueue(pane.visibleEntries.filter { selected.contains($0.id) }.map(\.url), to: target)
     }
 }
