@@ -3,6 +3,7 @@ import Observation
 
 @MainActor @Observable final class TransferStore {
     private let defaults: UserDefaults
+    private let checkpointDirectory: URL?
     var jobs: [TransferJob] = []
     var recoveryMessage: String?
     var savedTasks: [SavedTransferTask] = [] {
@@ -11,7 +12,8 @@ import Observation
             catch { recoveryMessage = "无法保存任务清单：\(error.localizedDescription)" }
         }
     }
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, checkpointDirectory: URL? = nil) {
+        self.checkpointDirectory = checkpointDirectory
         self.defaults = defaults
         if let data = defaults.data(forKey: "transferRecovery.v1") {
             do { savedTasks = try JSONDecoder().decode([SavedTransferTask].self, from: data) }
@@ -91,7 +93,11 @@ import Observation
                 jobs[index].totalBytes = try await remoteEngine.totalBytes(job.source)
                 jobs[index].startedAt = Date()
                 jobs[index].status = job.moving ? "移动中（写入后移除源文件）" : "传输与提交中"
-                let complete = try await remoteEngine.copy(job.source, into: job.destination, duplicateInPlace: job.duplicateInPlace, moving: job.moving, conflict: decide, progress: progress, warning: { [weak self] warning in
+                let journal = savedTasks.contains(where: { $0.id == (job.recoveryID ?? job.id) })
+                    ? try TransferCheckpointJournal(id: job.recoveryID ?? job.id, directory: checkpointDirectory) : nil
+                let complete = try await remoteEngine.copy(job.source, into: job.destination, duplicateInPlace: job.duplicateInPlace, moving: job.moving, journal: journal,
+                    phase: { [weak self] value in await self?.setPhase(value, id: job.id) },
+                    resumed: { [weak self] bytes in await self?.addResumed(bytes, id: job.id) }, conflict: decide, progress: progress, warning: { [weak self] warning in
                     await self?.addWarning(warning, id: job.id)
                 })
                 jobs[index].status = complete ? "已完成" : "已完成（含跳过）"
@@ -119,6 +125,12 @@ import Observation
         running = false
         task = nil
         batchChoice = nil
+    }
+    private func setPhase(_ value: String, id: UUID) {
+        if let index = jobs.firstIndex(where: { $0.id == id }) { jobs[index].status = value }
+    }
+    private func addResumed(_ bytes: Int64, id: UUID) {
+        if let index = jobs.firstIndex(where: { $0.id == id }) { jobs[index].resumedBytes += bytes }
     }
     private func addWarning(_ warning: String, id: UUID) {
         if let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].warnings.count < 20 { jobs[index].warnings.append(warning) }

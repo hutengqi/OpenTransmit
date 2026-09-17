@@ -6,7 +6,7 @@ actor SFTPStreamReader: TransferReader {
     let sftp: SFTPClient
     let file: SFTPFile
     private var offset: UInt64 = 0
-    init(sftp: SFTPClient, file: SFTPFile) { self.sftp = sftp; self.file = file }
+    init(sftp: SFTPClient, file: SFTPFile, offset: Int64 = 0) { self.sftp = sftp; self.file = file; self.offset = UInt64(offset) }
     func read() async throws -> Data {
         let offset = self.offset
         let buffer = try await SFTPDeadline.run(sftp) { [file] in try await file.read(from: offset, length: 64 * 1024) }
@@ -26,16 +26,21 @@ actor SFTPStreamWriter: TransferWriter {
     let replacing: Bool
     private var offset: UInt64 = 0
     private var committed = false
-    private init(connection: SFTPConnection, sftp: SFTPClient, file: SFTPFile, target: URL, staging: String, replacing: Bool) {
+    let retainPartial: Bool
+    private init(connection: SFTPConnection, sftp: SFTPClient, file: SFTPFile, target: URL, staging: String, replacing: Bool, retainPartial: Bool, offset: Int64) {
         self.connection = connection; self.sftp = sftp; self.file = file
         self.target = target; self.staging = staging; self.replacing = replacing
+        self.retainPartial = retainPartial; self.offset = UInt64(offset)
     }
-    static func open(connection: SFTPConnection, target: URL, replacing: Bool) async throws -> SFTPStreamWriter {
+    static func open(connection: SFTPConnection, target: URL, replacing: Bool, retainedStaging: URL? = nil, offset: Int64 = 0, existing: Bool = false) async throws -> SFTPStreamWriter {
         let sftp = try await connection.open()
-        let staging = target.deletingLastPathComponent().appendingPathComponent(".opentransmit-\(UUID().uuidString).partial").path
+        let staging = (retainedStaging ?? target.deletingLastPathComponent().appendingPathComponent(".opentransmit-\(UUID().uuidString).partial")).path
         do {
-            let file = try await SFTPDeadline.run(sftp) { try await sftp.openFile(filePath: staging, flags: [.write, .create, .forceCreate]) }
-            return SFTPStreamWriter(connection: connection, sftp: sftp, file: file, target: target, staging: staging, replacing: replacing)
+            var newAttributes = SFTPFileAttributes()
+            newAttributes.permissions = 0o600
+            let attributes = newAttributes
+            let file = try await SFTPDeadline.run(sftp) { try await sftp.openFile(filePath: staging, flags: existing ? [.write] : [.write, .create, .forceCreate], attributes: attributes) }
+            return SFTPStreamWriter(connection: connection, sftp: sftp, file: file, target: target, staging: staging, replacing: replacing, retainPartial: retainedStaging != nil, offset: offset)
         } catch { try? await sftp.close(); throw error }
     }
     func write(_ data: Data) async throws {
@@ -72,7 +77,7 @@ actor SFTPStreamWriter: TransferWriter {
     }
     func abort() async {
         try? await sftp.close()
-        guard !committed else { return }
+        guard !committed, !retainPartial else { return }
         let staging = self.staging
         // A canceled subchannel is closed; use a fresh one for best-effort cleanup.
         let connection = self.connection

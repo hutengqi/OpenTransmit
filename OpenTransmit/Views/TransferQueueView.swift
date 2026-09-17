@@ -14,12 +14,12 @@ struct TransferQueueView: View {
             if let message = store.recoveryMessage { Text(message).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
             if !store.orphanedTasks.isEmpty {
                 HStack {
-                    Text("\(store.orphanedTasks.count) 项可恢复任务（从头重新执行）").font(.caption)
+                    Text("\(store.orphanedTasks.count) 项可恢复任务（校验后续传）").font(.caption)
                     Menu("恢复任务") {
                         ForEach(store.orphanedTasks) { saved in
                             Menu("\(saved.moving == true ? "移动 · " : "复制 · ")\((saved.source.path as NSString).lastPathComponent) → \(saved.destination.path)") {
-                                Button("从头重新执行") { store.recover(saved) }
-                                Button("移除任务记录", role: .destructive) { store.savedTasks.removeAll { $0.id == saved.id } }
+                                Button("校验并继续") { store.recover(saved) }
+                                Button("移除记录（保留临时文件）", role: .destructive) { store.savedTasks.removeAll { $0.id == saved.id } }
                             }
                         }
                     }.disabled(store.deleting)
@@ -44,6 +44,10 @@ struct TransferQueueView: View {
                                 Text("\(Int(fraction * 100))% · \(ByteCountFormatter.string(fromByteCount: job.bytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: job.totalBytes ?? 0, countStyle: .file))")
                                     .font(.caption).monospacedDigit()
                             }
+                            if job.resumedBytes > 0 {
+                                Text("已复用 \(ByteCountFormatter.string(fromByteCount: job.resumedBytes, countStyle: .file))")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text("平均处理 \(ByteCountFormatter.string(fromByteCount: Int64(min(Double(Int64.max / 2), job.bytesPerSecond(at: context.date))), countStyle: .file))/秒")
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -54,7 +58,7 @@ struct TransferQueueView: View {
                                 .help(job.warnings.joined(separator: "\n"))
                         }
                         Text(job.status).font(.caption).lineLimit(2).frame(maxWidth: 250, alignment: .trailing)
-                        if job.failed || job.cancelled { Button("重新执行") { store.retry(job) } }
+                        if job.failed || job.cancelled { Button("校验并继续") { store.retry(job) } }
                     }
                 }.listStyle(.plain)
             }

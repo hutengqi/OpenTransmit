@@ -11,13 +11,12 @@
 		C00000000000000000000002 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000002 /* NIOCore */; };
 		C00000000000000000000003 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000003 /* NIOSSH */; };
 		C00000000000000000000004 /* Crypto in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000004 /* Crypto */; };
-		C6969920305A8D60008CDFAF /* AGENTS.md in Resources */ = {isa = PBXBuildFile; fileRef = C696991F305A8D60008CDFAF /* AGENTS.md */; };
 		C6F92576305784C5000938BA /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = C6F92575305784C5000938BA /* README.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* OpenTransmit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenTransmit.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		C696991E305A8D60008CDFAF /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = "zh-Hans"; path = "zh-Hans.lproj/AGENTS.md"; sourceTree = "<group>"; };
+		C696991E305A8D60008CDFAF /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = "zh-Hans"; path = AGENTS.md; sourceTree = "<group>"; };
 		C6F92575305784C5000938BA /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -133,7 +132,6 @@
 			isa = PBXResourcesBuildPhase;
 			files = (
 				C6F92576305784C5000938BA /* README.md in Resources */,
-				C6969920305A8D60008CDFAF /* AGENTS.md in Resources */,
 			);
 		};
 /* End PBXResourcesBuildPhase section */

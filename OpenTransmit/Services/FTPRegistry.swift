@@ -69,6 +69,19 @@ actor FTPRegistry: TransferEndpoint {
         try await connection(url).request(path: url.path, mode: 1, file: scratch.file)
         return try FTPDiskReader(scratch: scratch)
     }
+    func reader(_ url: URL, offset: Int64) async throws -> any TransferReader {
+        guard let item = try await entry(url), !item.isDirectory, !item.isSymbolicLink, offset <= item.size else {
+            throw TransferFailure(message: "FTP 源文件不可读取或偏移超出范围。")
+        }
+        return FTPRangeReader(connection: try connection(url), url: url, offset: offset, size: item.size)
+    }
+    func resumeWriter(_ url: URL, replacing: Bool, staging: URL, offset: Int64) async throws -> any TransferWriter {
+        let partial = try await entry(staging)
+        guard partial == nil ? offset == 0 : (!partial!.isDirectory && !partial!.isSymbolicLink && partial!.size == offset) else {
+            throw TransferFailure(message: "FTP 续传文件在校验后发生变化。")
+        }
+        return try FTPDiskWriter(connection: connection(url), target: url, replacing: replacing, retainedStaging: staging, offset: offset)
+    }
     func writer(_ url: URL, replacing: Bool) throws -> any TransferWriter {
         try FTPDiskWriter(connection: connection(url), target: url, replacing: replacing)
     }
@@ -100,16 +113,30 @@ actor FTPDiskWriter: TransferWriter {
     let staging: String
     private var file: FileHandle?
     private var committed = false
-    init(connection: FTPConnection, target: URL, replacing: Bool) throws {
+    private var prepared = false
+    let retainPartial: Bool
+    let resumeOffset: Int64
+    init(connection: FTPConnection, target: URL, replacing: Bool, retainedStaging: URL? = nil, offset: Int64 = 0) throws {
         self.connection = connection; self.target = target; self.replacing = replacing
+        retainPartial = retainedStaging != nil; resumeOffset = offset
         scratch = try FTPScratch()
         file = try FileHandle(forWritingTo: scratch.file)
-        staging = target.deletingLastPathComponent().appendingPathComponent(".opentransmit-\(UUID().uuidString).partial").path
+        try file?.truncate(atOffset: UInt64(offset))
+        try file?.seek(toOffset: UInt64(offset))
+        staging = (retainedStaging ?? target.deletingLastPathComponent().appendingPathComponent(".opentransmit-\(UUID().uuidString).partial")).path
     }
     func write(_ data: Data) throws { try Task.checkCancellation(); try file?.write(contentsOf: data) }
-    func commit() async throws {
+    func prepare() async throws {
+        guard !prepared else { return }
         try file?.synchronize(); try file?.close(); file = nil
-        try await connection.request(path: staging, mode: 2, file: scratch.file)
+        let size = (try scratch.file.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0
+        if resumeOffset == 0 || Int64(size) > resumeOffset {
+            try await connection.request(path: staging, mode: 2, file: scratch.file, offset: resumeOffset)
+        }
+        prepared = true
+    }
+    func commit() async throws {
+        try await prepare()
         let backup = target.deletingLastPathComponent().appendingPathComponent(".opentransmit-\(UUID().uuidString).backup").path
         // Re-check names before publishing. FTP has no portable atomic no-clobber rename.
         let siblings = try await connection.children(target.deletingLastPathComponent())
@@ -139,7 +166,32 @@ actor FTPDiskWriter: TransferWriter {
     }
     func abort() async {
         try? file?.close(); file = nil; scratch.remove()
-        guard !committed else { return }
+        guard !committed, !retainPartial else { return }
         await Task.detached { [connection, staging] in try? await connection.command("DELE", path: staging) }.value
     }
+}
+
+/// Bounded range requests expose downloaded chunks before the whole FTP file completes.
+actor FTPRangeReader: TransferReader {
+    let connection: FTPConnection
+    let url: URL
+    var offset: Int64
+    let size: Int64
+    init(connection: FTPConnection, url: URL, offset: Int64, size: Int64) {
+        self.connection = connection; self.url = url; self.offset = offset; self.size = size
+    }
+    func read() async throws -> Data {
+        try Task.checkCancellation()
+        guard offset < size else { return Data() }
+        let scratch = try FTPScratch()
+        defer { scratch.remove() }
+        let length = min(Int64(64 * 1024), size - offset)
+        try await connection.request(path: url.path, mode: 1, file: scratch.file, offset: offset, length: length)
+        let bytes = try scratch.file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard bytes == length else { throw TransferFailure(message: "FTP 服务器未正确返回续传范围，已停止传输。") }
+        let data = try Data(contentsOf: scratch.file)
+        offset += Int64(data.count)
+        return data
+    }
+    func close() {}
 }

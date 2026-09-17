@@ -12,7 +12,7 @@ static int progress(void *p, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_
     return state->canceled(state->context);
 }
 int ot_ftp_request(const char *url, const char *username, const char *password,
-                   int tls, int mode, const char *file_path,
+                   int tls, int mode, const char *file_path, long long offset, long long length,
                    const char *command1, const char *command2,
                    OTFTPCancel canceled, void *context, long *reply) {
     pthread_once(&initialized, initialize);
@@ -49,6 +49,14 @@ int ot_ftp_request(const char *url, const char *username, const char *password,
     SET(CURLOPT_NOPROGRESS, 0L);
     SET(CURLOPT_XFERINFOFUNCTION, progress);
     SET(CURLOPT_XFERINFODATA, &state);
+    if (offset < 0 || length < 0) { result = CURLE_BAD_FUNCTION_ARGUMENT; goto cleanup; }
+    if (mode == 1 && length > 0) {
+        char range[96];
+        snprintf(range, sizeof(range), "%lld-%lld", offset, offset + length - 1);
+        SET(CURLOPT_RANGE, range);
+    } else if (mode == 1 && offset > 0) {
+        SET(CURLOPT_RESUME_FROM_LARGE, (curl_off_t)offset);
+    }
     if (mode != 3) {
         file = fopen(file_path, mode == 2 ? "rb" : "wb");
         if (!file) { result = CURLE_WRITE_ERROR; goto cleanup; }
@@ -57,7 +65,10 @@ int ot_ftp_request(const char *url, const char *username, const char *password,
             if (fstat(fileno(file), &st)) { result = CURLE_READ_ERROR; goto cleanup; }
             SET(CURLOPT_UPLOAD, 1L);
             SET(CURLOPT_READDATA, file);
-            SET(CURLOPT_INFILESIZE_LARGE, (curl_off_t)st.st_size);
+            if (offset > st.st_size || fseeko(file, (off_t)offset, SEEK_SET)) { result = CURLE_READ_ERROR; goto cleanup; }
+            // Explicitly position the input and append only the verified suffix.
+            if (offset > 0) { SET(CURLOPT_APPEND, 1L); }
+            SET(CURLOPT_INFILESIZE_LARGE, (curl_off_t)(st.st_size - offset));
         } else {
             SET(CURLOPT_WRITEDATA, file);
             if (mode == 0) { SET(CURLOPT_CUSTOMREQUEST, "MLSD"); }

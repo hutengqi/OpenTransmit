@@ -17,9 +17,12 @@ protocol TransferReader: Sendable {
 }
 protocol TransferWriter: Sendable {
     func write(_ data: Data) async throws
+    func prepare() async throws
     func commit() async throws
     func abort() async
 }
+extension TransferWriter { func prepare() async throws {} }
+
 protocol TransferEndpoint: Sendable {
     func entry(_ url: URL) async throws -> FileEntry?
     func children(_ url: URL) async throws -> [FileEntry]
@@ -29,9 +32,18 @@ protocol TransferEndpoint: Sendable {
     func removeMovedSource(_ item: FileEntry) async throws
     func reader(_ url: URL) async throws -> any TransferReader
     func writer(_ url: URL, replacing: Bool) async throws -> any TransferWriter
+    func reader(_ url: URL, offset: Int64) async throws -> any TransferReader
+    func resumeWriter(_ url: URL, replacing: Bool, staging: URL, offset: Int64) async throws -> any TransferWriter
 }
 
 extension TransferEndpoint {
+    func reader(_ url: URL, offset: Int64) async throws -> any TransferReader {
+        guard offset == 0 else { throw TransferFailure(message: "此端点不支持偏移读取。") }
+        return try await reader(url)
+    }
+    func resumeWriter(_ url: URL, replacing: Bool, staging: URL, offset: Int64) async throws -> any TransferWriter {
+        throw TransferFailure(message: "此端点不支持断点续传。")
+    }
     func removeMovedSource(_ item: FileEntry) async throws {
         throw TransferFailure(message: "此端点不支持移动后的源项目移除。")
     }
@@ -70,6 +82,9 @@ actor EndpointTransferEngine {
     }
 
     func copy(_ source: URL, into directory: URL, duplicateInPlace: Bool = false, moving: Bool = false,
+              journal: TransferCheckpointJournal? = nil,
+              phase: @Sendable (String) async -> Void = { _ in },
+              resumed: @Sendable (Int64) async -> Void = { _ in },
               conflict: @Sendable (FileConflict) async -> ConflictChoice,
               progress: @Sendable (Int64) async -> Void,
               warning: @Sendable (String) async -> Void = { _ in }) async throws -> Bool {
@@ -89,10 +104,12 @@ actor EndpointTransferEngine {
         else if sourceIdentity == targetIdentity || targetIdentity.hasPrefix(sourceIdentity + "/") {
             throw TransferFailure(message: "不能将项目传输到自身或其子目录。")
         }
-        return try await copyItem(item, to: target, depth: 0, moving: moving, conflict: conflict, progress: progress, warning: warning)
+        return try await copyItem(item, to: target, depth: 0, moving: moving, journal: journal, phase: phase, resumed: resumed, conflict: conflict, progress: progress, warning: warning)
     }
 
     private func copyItem(_ item: FileEntry, to requested: URL, depth: Int, moving: Bool,
+                          journal: TransferCheckpointJournal?, phase: @Sendable (String) async -> Void,
+                          resumed: @Sendable (Int64) async -> Void,
                           conflict: @Sendable (FileConflict) async -> ConflictChoice,
                           progress: @Sendable (Int64) async -> Void,
                           warning: @Sendable (String) async -> Void) async throws -> Bool {
@@ -122,7 +139,7 @@ actor EndpointTransferEngine {
                 guard child.name != ".", child.name != "..", !child.name.contains("/"), !child.name.contains("\0") else {
                     throw TransferFailure(message: "服务器返回了无效文件名。")
                 }
-                let copied = try await copyItem(child, to: target.appendingPathComponent(child.name), depth: depth + 1, moving: moving, conflict: conflict, progress: progress, warning: warning)
+                let copied = try await copyItem(child, to: target.appendingPathComponent(child.name), depth: depth + 1, moving: moving, journal: journal, phase: phase, resumed: resumed, conflict: conflict, progress: progress, warning: warning)
                 complete = copied && complete
             }
             if created { await preserve(item, at: target, warning: warning) }
@@ -136,11 +153,45 @@ actor EndpointTransferEngine {
             }
             return complete
         }
-        let input = try await endpoint.reader(item.url)
+        var checkpoint: FileCheckpoint?
+        var checkpointKey = ""
+        var staging: URL?
+        var offset: Int64 = 0
+        if let journal {
+            await phase("正在校验源文件与续传数据…")
+            checkpointKey = TransferCheckpointJournal.key(try await endpoint.canonicalIdentity(item.url) + "\n" + endpoint.canonicalIdentity(target))
+            let digest = try await endpoint.contentDigest(item.url)
+            if let saved = await journal.record(for: checkpointKey) {
+                guard saved.size == item.size, saved.modified == item.modified, saved.digest == digest else {
+                    throw TransferFailure(message: "源文件已变化，已拒绝续传。请移除原任务记录后重新添加任务；旧临时文件保留供检查。")
+                }
+                checkpoint = saved
+            } else {
+                let saved = FileCheckpoint(token: UUID(), size: item.size, modified: item.modified, digest: digest)
+                try await journal.save(saved, for: checkpointKey)
+                checkpoint = saved
+            }
+            staging = target.deletingLastPathComponent().appendingPathComponent(checkpoint!.stagingName)
+            if let partial = try await endpoint.entry(staging!) {
+                guard !partial.isDirectory, !partial.isSymbolicLink, partial.size >= 0, partial.size <= item.size else {
+                    throw TransferFailure(message: "续传临时文件类型或长度异常，未修改目标。")
+                }
+                let prefix = try await endpoint.contentDigest(item.url, limit: partial.size)
+                guard try await endpoint.contentDigest(staging!) == prefix else {
+                    throw TransferFailure(message: "已传内容校验不一致，已拒绝续传。请移除任务记录后重新添加任务；旧临时文件保留供检查。")
+                }
+                offset = partial.size
+            }
+        }
+        let input = try await endpoint.reader(item.url, offset: offset)
         do {
-            let output = try await endpoint.writer(target, replacing: replacing)
+            let output: any TransferWriter
+            if let staging { output = try await endpoint.resumeWriter(target, replacing: replacing, staging: staging, offset: offset) }
+            else { output = try await endpoint.writer(target, replacing: replacing) }
+            if offset > 0 { await progress(offset); await resumed(offset) }
+            await phase(offset > 0 ? "从已校验位置继续传输" : "传输与提交中")
             do {
-                var count: Int64 = 0
+                var count: Int64 = offset
                 while true {
                     try Task.checkCancellation()
                     let data = try await input.read()
@@ -151,7 +202,17 @@ actor EndpointTransferEngine {
                 }
                 guard count == item.size else { throw TransferFailure(message: "源文件大小在传输期间发生变化，请重试。") }
                 try Task.checkCancellation()
+                try await output.prepare()
+                if let checkpoint, let staging {
+                    await phase("正在校验完整文件并提交…")
+                    guard try await endpoint.contentDigest(staging) == checkpoint.digest,
+                          try await endpoint.contentDigest(item.url) == checkpoint.digest else {
+                        throw TransferFailure(message: "完整内容校验失败，目标未提交，源文件保留。")
+                    }
+                }
+                try Task.checkCancellation()
                 try await output.commit()
+                if let journal { try await journal.save(nil, for: checkpointKey) }
                 await input.close()
                 await preserve(item, at: target, warning: warning)
                 if moving {

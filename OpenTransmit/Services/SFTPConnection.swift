@@ -243,14 +243,24 @@ actor SFTPRegistry: TransferEndpoint {
         let metadata = attributes
         try await connection(url).perform { try await $0.setAttributes(at: url.path, to: metadata) }
     }
-    func reader(_ url: URL) async throws -> any TransferReader {
-        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.reader(url) }
-        if url.isFileURL { return try await local.reader(url) }
+    func reader(_ url: URL) async throws -> any TransferReader { try await reader(url, offset: 0) }
+    func reader(_ url: URL, offset: Int64) async throws -> any TransferReader {
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.reader(url, offset: offset) }
+        if url.isFileURL { return try await local.reader(url, offset: offset) }
         let sftp = try await connection(url).open()
         do {
             let file = try await SFTPDeadline.run(sftp) { try await sftp.openFile(filePath: url.path, flags: .read) }
-            return SFTPStreamReader(sftp: sftp, file: file)
+            return SFTPStreamReader(sftp: sftp, file: file, offset: offset)
         } catch { try? await sftp.close(); throw error }
+    }
+    func resumeWriter(_ url: URL, replacing: Bool, staging: URL, offset: Int64) async throws -> any TransferWriter {
+        if url.isFileURL { return try await local.resumeWriter(url, replacing: replacing, staging: staging, offset: offset) }
+        if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.resumeWriter(url, replacing: replacing, staging: staging, offset: offset) }
+        let partial = try await entry(staging)
+        guard partial == nil ? offset == 0 : (!partial!.isDirectory && !partial!.isSymbolicLink && partial!.size == offset) else {
+            throw TransferFailure(message: "SFTP 续传文件在校验后发生变化。")
+        }
+        return try await SFTPStreamWriter.open(connection: connection(url), target: url, replacing: replacing, retainedStaging: staging, offset: offset, existing: partial != nil)
     }
     func writer(_ url: URL, replacing: Bool) async throws -> any TransferWriter {
         if url.scheme == "opentransmit-ftp" { return try await FTPRegistry.shared.writer(url, replacing: replacing) }

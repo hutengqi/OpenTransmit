@@ -65,6 +65,7 @@ struct TransferJob: Identifiable {
     var recoveryID: UUID?
     var status = "等待中"
     var bytes: Int64 = 0
+    var resumedBytes: Int64 = 0
     var totalBytes: Int64?
     var startedAt: Date?
     var endedAt: Date?
@@ -78,7 +79,7 @@ struct TransferJob: Identifiable {
     }
     func bytesPerSecond(at now: Date) -> Double {
         guard let startedAt else { return 0 }
-        return Double(bytes) / max(0.001, (endedAt ?? now).timeIntervalSince(startedAt))
+        return Double(max(0, bytes - resumedBytes)) / max(0.001, (endedAt ?? now).timeIntervalSince(startedAt))
     }
     var finished = false
     var failed = false

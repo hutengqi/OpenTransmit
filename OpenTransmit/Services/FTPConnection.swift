@@ -17,7 +17,7 @@ struct FTPConnection: Sendable {
             throw TransferFailure(message: "FTP 路径无效，不能包含控制字符或相对路径段。")
         }
     }
-    func request(path: String, mode: Int32, file: URL? = nil, commands: [String] = []) async throws {
+    func request(path: String, mode: Int32, file: URL? = nil, offset: Int64 = 0, length: Int64 = 0, commands: [String] = []) async throws {
         try Self.validatePath(path)
         try Task.checkCancellation()
         var components = URLComponents()
@@ -32,7 +32,7 @@ struct FTPConnection: Sendable {
             try await Task.detached {
                 var reply: Int = 0
                 let code = ot_ftp_request(address, server.username, password, server.protocolKind == .ftps ? 1 : 0,
-                                          mode, file?.path ?? "", commands.first ?? "", commands.dropFirst().first ?? "",
+                                          mode, file?.path ?? "", offset, length, commands.first ?? "", commands.dropFirst().first ?? "",
                                           { raw in
                     guard let raw else { return 1 }
                     return Unmanaged<FTPCancellation>.fromOpaque(raw).takeUnretainedValue().canceled ? 1 : 0
