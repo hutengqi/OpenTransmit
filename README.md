@@ -14,6 +14,8 @@ OpenTransmit 是一款使用 SwiftUI 与 AppKit 构建的原生 macOS 文件传�
 
 当前为 **0.3 多协议开发预览版**，运行要求为 **macOS 14 Sonoma 及以上**。旧系统及不同服务器的兼容性仍在验证中。
 
+<img src="docs/images/app-screenshot.png" alt="OpenTransmit 主界面：本地与 SFTP 双栏文件浏览、工作区及传输队列" style="border-radius: 17px;">
+
 ### 双栏浏览与文件管理
 
 左右文件栏独立选择位置、浏览目录和选择文件，可以自由组合本地磁盘、已挂载共享与远程服务器。
