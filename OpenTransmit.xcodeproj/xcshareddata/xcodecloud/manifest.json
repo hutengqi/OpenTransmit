@@ -1,0 +1,9 @@
+{
+  "id" : "578264cc-c6ec-4fd6-b859-0682756d99a2",
+  "targets" : [
+    {
+      "id" : "e20547a8-1ec7-4087-9922-b9e260a25c3f",
+      "name" : "OpenTransmit"
+    }
+  ]
+}
