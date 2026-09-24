@@ -7,7 +7,8 @@ struct ContentView: View {
     private var activeTab: WorkspaceTab { tabs.first { $0.id == selectedTabID } ?? tabs[0] }
     private var left: PaneStore { activeTab.left }
     private var right: PaneStore { activeTab.right }
-    @State private var transfers = TransferStore()
+    @Bindable var transfers: TransferStore
+    @ObservedObject var updates: AppUpdateStore
     @State private var showServer = false
     @State private var comparison: DirectoryComparisonRequest?
     @State private var editingServer: ServerProfile?
@@ -81,6 +82,13 @@ struct ContentView: View {
                 }
                 .id(activeTab.id)
                 Divider()
+                if updates.waitingForFileOperations {
+                    Label("更新已就绪，文件操作结束后将自动重启。", systemImage: "arrow.down.circle")
+                        .font(.callout).padding(8)
+                }
+                if let message = updates.startupError {
+                    Text(message).font(.caption).foregroundStyle(.secondary).padding(8)
+                }
                 TransferQueueView(store: transfers)
             }
         }
@@ -97,6 +105,11 @@ struct ContentView: View {
                         comparison = DirectoryComparisonRequest(left: a, right: b)
                     }
                 }.disabled(left.directory == nil || right.directory == nil || left.loading || right.loading || transfers.running || transfers.deleting)
+                Button(updates.availableVersion.map { "更新至 \($0)…" } ?? "检查更新…", systemImage: "arrow.down.circle") {
+                    updates.checkForUpdates()
+                }
+                .disabled(!updates.canCheckForUpdates)
+                .help("检查 GitHub 上的新版本，确认后下载并安装")
                 Button("刷新两栏", systemImage: "arrow.clockwise") { left.refresh(); right.refresh() }
                     .keyboardShortcut("r", modifiers: .command)
             }
@@ -128,6 +141,7 @@ struct ContentView: View {
         .alert("操作未完成", isPresented: Binding(get: { error != nil || library.error != nil }, set: { if !$0 { error = nil; library.error = nil } })) {
             Button("好") { error = nil; library.error = nil }
         } message: { Text(error ?? library.error ?? "") }
+        .disabled(transfers.installingApplicationUpdate)
         .onAppear { transfers.onChange = { for tab in tabs { tab.left.refresh(); tab.right.refresh() } } }
     }
     private var defaultSource: PaneStore { activeTab.direction == .rightToLeft ? right : left }

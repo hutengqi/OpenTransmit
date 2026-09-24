@@ -21,16 +21,16 @@ import Observation
         }
     }
     var orphanedTasks: [SavedTransferTask] { savedTasks.filter { saved in !jobs.contains { $0.id == saved.id || $0.recoveryID == saved.id } } }
-    private var recoveringIDs: Set<UUID> = []
+    private var recoveringIDs: Set<UUID> = [] { didSet { onActivityChange?() } }
     func recover(_ saved: SavedTransferTask) {
-        guard !deleting, !recoveringIDs.contains(saved.id), !jobs.contains(where: { !$0.finished && ($0.id == saved.id || $0.recoveryID == saved.id) }) else { return }
+        guard !installingApplicationUpdate, !deleting, !recoveringIDs.contains(saved.id), !jobs.contains(where: { !$0.finished && ($0.id == saved.id || $0.recoveryID == saved.id) }) else { return }
         recoveringIDs.insert(saved.id)
         Task {
             defer { recoveringIDs.remove(saved.id) }
             do {
                 let source = try await saved.source.resolve()
                 let destination = try await saved.destination.resolve()
-                guard !deleting else { return }
+                guard !installingApplicationUpdate, !deleting else { return }
                 enqueue([source], to: destination, duplicateInPlace: saved.duplicateInPlace, moving: saved.moving ?? false, recoveryID: saved.id)
                 recoveryMessage = nil
             } catch { recoveryMessage = error.transferDescription }
@@ -49,8 +49,11 @@ import Observation
     }
     var conflict: FileConflict?
     var applyToRemaining = false
-    var running = false
-    var deleting = false
+    var installingApplicationUpdate = false
+    var busyForApplicationUpdate: Bool { running || deleting || !recoveringIDs.isEmpty }
+    var onActivityChange: (() -> Void)?
+    var running = false { didSet { onActivityChange?() } }
+    var deleting = false { didSet { onActivityChange?() } }
     private var continuation: CheckedContinuation<ConflictChoice, Never>?
     private var batchChoice: ConflictChoice?
     private var task: Task<Void, Never>?
@@ -58,14 +61,14 @@ import Observation
     var onChange: (() -> Void)?
 
     func editItem(at location: URL, name: String, rename: Bool) async throws {
-        guard !running, !deleting else { throw TransferFailure(message: "请等待传输或文件操作结束。") }
+        guard !installingApplicationUpdate, !running, !deleting else { throw TransferFailure(message: "请等待传输或文件操作结束。") }
         deleting = true
         defer { deleting = false; onChange?() }
         if rename { try await SFTPRegistry.shared.renameItem(location, name: name) }
         else { try await SFTPRegistry.shared.createNamedDirectory(in: location, name: name) }
     }
     func enqueue(_ urls: [URL], to destination: URL, duplicateInPlace: Bool = false, moving: Bool = false, recoveryID: UUID? = nil) {
-        guard !deleting else { return }
+        guard !installingApplicationUpdate, !deleting else { return }
         for source in urls where source.isTransferLocation {
             if source.isFileURL { _ = source.startAccessingSecurityScopedResource() }
             jobs.append(TransferJob(source: source, destination: destination, duplicateInPlace: duplicateInPlace, moving: moving, recoveryID: recoveryID))
@@ -157,7 +160,7 @@ import Observation
     }
     func cancel() { task?.cancel(); if continuation != nil { resolve(.cancel) } }
     func retry(_ job: TransferJob) {
-        guard !deleting else { return }
+        guard !installingApplicationUpdate, !deleting else { return }
         if let saved = savedTasks.first(where: { $0.id == job.id || $0.id == job.recoveryID }) { recover(saved) }
         else { enqueue([job.source], to: job.destination, duplicateInPlace: job.duplicateInPlace, moving: job.moving) }
     }

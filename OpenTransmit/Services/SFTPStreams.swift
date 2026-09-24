@@ -2,17 +2,60 @@ import Foundation
 @preconcurrency import Citadel
 import NIOCore
 
+// Keep requests small for server compatibility, but amortize network round trips.
+private enum SFTPWindow {
+    static let chunk = 32 * 1024
+    static let requests = 32
+    static let bytes = chunk * requests
+}
+
 actor SFTPStreamReader: TransferReader {
     let sftp: SFTPClient
     let file: SFTPFile
-    private var offset: UInt64 = 0
-    init(sftp: SFTPClient, file: SFTPFile, offset: Int64 = 0) { self.sftp = sftp; self.file = file; self.offset = UInt64(offset) }
+    private var offset: UInt64
+    private var ended = false
+    init(sftp: SFTPClient, file: SFTPFile, offset: Int64 = 0) {
+        self.sftp = sftp; self.file = file; self.offset = UInt64(offset)
+    }
     func read() async throws -> Data {
-        let offset = self.offset
-        let buffer = try await SFTPDeadline.run(sftp) { [file] in try await file.read(from: offset, length: 64 * 1024) }
-        let data = Data(buffer.readableBytesView)
-        self.offset += UInt64(data.count)
-        return data
+        try Task.checkCancellation()
+        if ended { return Data() }
+        let start = offset
+        let blocks = try await SFTPDeadline.run(sftp) { [file] in
+            try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+                for index in 0..<SFTPWindow.requests {
+                    group.addTask {
+                        var data = Data()
+                        // A short DATA response need not mean EOF. Fill this range first.
+                        while data.count < SFTPWindow.chunk {
+                            try Task.checkCancellation()
+                            let buffer = try await file.read(
+                                from: start + UInt64(index * SFTPWindow.chunk + data.count),
+                                length: UInt32(SFTPWindow.chunk - data.count))
+                            if buffer.readableBytes == 0 { break }
+                            guard buffer.readableBytes <= SFTPWindow.chunk - data.count else {
+                                throw TransferFailure(message: "SFTP 返回的数据超过请求范围。")
+                            }
+                            data.append(contentsOf: buffer.readableBytesView)
+                        }
+                        return (index, data)
+                    }
+                }
+                var blocks = Array(repeating: Data(), count: SFTPWindow.requests)
+                for try await (index, data) in group { blocks[index] = data }
+                return blocks
+            }
+        }
+        var result = Data()
+        for block in blocks {
+            guard !ended || block.isEmpty else {
+                throw TransferFailure(message: "SFTP 文件在读取期间发生变化。")
+            }
+            result.append(block)
+            if block.count < SFTPWindow.chunk { ended = true }
+        }
+        offset += UInt64(result.count)
+        return result
     }
     func close() async { try? await sftp.close() }
 }
@@ -26,6 +69,7 @@ actor SFTPStreamWriter: TransferWriter {
     let replacing: Bool
     private var offset: UInt64 = 0
     private var committed = false
+    private var pending = Data()
     let retainPartial: Bool
     private init(connection: SFTPConnection, sftp: SFTPClient, file: SFTPFile, target: URL, staging: String, replacing: Bool, retainPartial: Bool, offset: Int64) {
         self.connection = connection; self.sftp = sftp; self.file = file
@@ -44,11 +88,38 @@ actor SFTPStreamWriter: TransferWriter {
         } catch { try? await sftp.close(); throw error }
     }
     func write(_ data: Data) async throws {
-        let offset = self.offset
-        try await SFTPDeadline.run(sftp) { [file] in try await file.write(ByteBuffer(bytes: data), at: offset) }
-        self.offset += UInt64(data.count)
+        try Task.checkCancellation()
+        var position = 0
+        while position < data.count {
+            let count = min(SFTPWindow.bytes - pending.count, data.count - position)
+            let lower = data.startIndex + position
+            pending.append(data[lower..<(lower + count)])
+            position += count
+            if pending.count == SFTPWindow.bytes { try await prepare() }
+        }
+    }
+    func prepare() async throws {
+        try Task.checkCancellation()
+        guard !pending.isEmpty else { return }
+        let payload = pending
+        let start = offset
+        try await SFTPDeadline.run(sftp) { [file] in
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for position in stride(from: 0, to: payload.count, by: SFTPWindow.chunk) {
+                    let block = payload.subdata(in: position..<min(position + SFTPWindow.chunk, payload.count))
+                    group.addTask {
+                        try Task.checkCancellation()
+                        try await file.write(ByteBuffer(bytes: block), at: start + UInt64(position))
+                    }
+                }
+                try await group.waitForAll()
+            }
+        }
+        offset += UInt64(payload.count)
+        pending.removeAll(keepingCapacity: true)
     }
     func commit() async throws {
+        try await prepare()
         try await SFTPDeadline.run(sftp) { [file] in try await file.close() }
         try Task.checkCancellation()
         let backup = target.deletingLastPathComponent().appendingPathComponent(".opentransmit-\(UUID().uuidString).backup").path

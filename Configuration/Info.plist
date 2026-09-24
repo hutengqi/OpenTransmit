@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>SUPublicEDKey</key><string>BMoXQpQ/urs+RHNv/R86dI1XRqK9bEushAMQkrNXkMc=</string>
+    <key>SURequireSignedFeed</key><true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/hutengqi/OpenTransmit/releases/latest/download/appcast.xml</string>
+    <key>SUEnableInstallerLauncherService</key><true/>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><false/>
+    <key>SUAllowsAutomaticUpdates</key><false/>
+    <key>SUSendProfileInfo</key><false/>
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>
+</dict></plist>

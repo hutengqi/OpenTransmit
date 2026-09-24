@@ -1,5 +1,5 @@
 {
-  "originHash" : "c5fdf770401f4917c81db0e07fe724b743dc26cd29cfa618748a162da3091f5a",
+  "originHash" : "57adda08068afd93a7b705f0f3025ba4c87e9ed2d61d44abfed82f50265be24f",
   "pins" : [
     {
       "identity" : "bigint",
@@ -16,6 +16,15 @@
       "location" : "https://github.com/orlandos-nl/Citadel.git",
       "state" : {
         "revision" : "ae8562f895de06ccb86fdb1cbb65fd99c8976e12"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle.git",
+      "state" : {
+        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version" : "2.10.0"
       }
     },
     {

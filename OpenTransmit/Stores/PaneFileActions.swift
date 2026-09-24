@@ -14,7 +14,7 @@ import AppKit
         transfers.enqueue(clipboardURLs, to: directory, duplicateInPlace: true)
     }
     static func confirmDelete(_ urls: [URL], transfers: TransferStore) {
-        guard urls.allSatisfy(\.isTransferLocation), !urls.isEmpty, !transfers.running, !transfers.deleting else { return }
+        guard urls.allSatisfy(\.isTransferLocation), !urls.isEmpty, !transfers.installingApplicationUpdate, !transfers.running, !transfers.deleting else { return }
         let remote = urls.contains { $0.isRemoteFile }
         // Freeze the exact selection before opening confirmation.
         let alert = NSAlert()
@@ -26,7 +26,8 @@ import AppKit
         alert.addButton(withTitle: remote ? "永久删除" : "移到废纸篓")
         alert.buttons[0].keyEquivalent = "\r"
         alert.buttons[1].hasDestructiveAction = true
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        guard alert.runModal() == .alertSecondButtonReturn,
+              !transfers.installingApplicationUpdate, !transfers.running, !transfers.deleting else { return }
         transfers.deleting = true
         Task {
             var result = await TrashService().trash(urls.filter(\.isFileURL))

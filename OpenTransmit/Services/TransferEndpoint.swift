@@ -58,7 +58,7 @@ extension TransferEndpoint {
     func applyMetadata(_ entry: FileEntry, to url: URL) async throws {}
 }
 
-/// Endpoint-neutral recursive transfer. At most one 64 KiB payload is in flight.
+/// Endpoint-neutral recursive transfer. Protocol streams own their bounded I/O windows.
 actor EndpointTransferEngine {
     let endpoint: any TransferEndpoint
     init(endpoint: any TransferEndpoint) { self.endpoint = endpoint }

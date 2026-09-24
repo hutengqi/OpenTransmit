@@ -12,6 +12,7 @@
 		C00000000000000000000003 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000003 /* NIOSSH */; };
 		C00000000000000000000004 /* Crypto in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000004 /* Crypto */; };
 		C6F92576305784C5000938BA /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = C6F92575305784C5000938BA /* README.md */; };
+		C00000000000000000000005 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000005 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +37,7 @@
 				C00000000000000000000002 /* NIOCore in Frameworks */,
 				C00000000000000000000003 /* NIOSSH in Frameworks */,
 				C00000000000000000000004 /* Crypto in Frameworks */,
+				C00000000000000000000005 /* Sparkle in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -81,6 +83,7 @@
 				B00000000000000000000002 /* NIOCore */,
 				B00000000000000000000003 /* NIOSSH */,
 				B00000000000000000000004 /* Crypto */,
+				B00000000000000000000005 /* Sparkle */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* OpenTransmit.app */;
@@ -116,6 +119,7 @@
 				A00000000000000000000002 /* XCRemoteSwiftPackageReference "swift-nio" */,
 				A00000000000000000000003 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 				A00000000000000000000004 /* XCRemoteSwiftPackageReference "swift-crypto" */,
+				A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 110;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -287,7 +291,8 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = OpenTransmit/OpenTransmit.entitlements;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = HRTKJH925V;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -301,6 +306,7 @@
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Configuration/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenTransmit;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -351,7 +357,8 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = OpenTransmit/OpenTransmit.entitlements;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = HRTKJH925V;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -365,6 +372,7 @@
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Configuration/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = OpenTransmit;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -463,6 +471,7 @@
 				minimumVersion = 3.12.3;
 			};
 		};
+		A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/sparkle-project/Sparkle.git"; requirement = {kind = exactVersion; version = 2.10.0; }; };
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -486,6 +495,7 @@
 			package = A00000000000000000000004 /* XCRemoteSwiftPackageReference "swift-crypto" */;
 			productName = Crypto;
 		};
+		B00000000000000000000005 /* Sparkle */ = {isa = XCSwiftPackageProductDependency; package = A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */; productName = Sparkle; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
