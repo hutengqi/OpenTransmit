@@ -11,8 +11,8 @@
 		C00000000000000000000002 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000002 /* NIOCore */; };
 		C00000000000000000000003 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000003 /* NIOSSH */; };
 		C00000000000000000000004 /* Crypto in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000004 /* Crypto */; };
-		C6F92576305784C5000938BA /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = C6F92575305784C5000938BA /* README.md */; };
 		C00000000000000000000005 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000005 /* Sparkle */; };
+		C6F92576305784C5000938BA /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = C6F92575305784C5000938BA /* README.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -290,9 +290,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = OpenTransmit/OpenTransmit.entitlements;
-				CURRENT_PROJECT_VERSION = 2;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = HRTKJH925V;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -322,7 +322,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lcurl",
@@ -356,9 +356,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = OpenTransmit/OpenTransmit.entitlements;
-				CURRENT_PROJECT_VERSION = 2;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = HRTKJH925V;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -388,7 +388,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lcurl",
@@ -471,7 +471,14 @@
 				minimumVersion = 3.12.3;
 			};
 		};
-		A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/sparkle-project/Sparkle.git"; requirement = {kind = exactVersion; version = 2.10.0; }; };
+		A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -495,7 +502,11 @@
 			package = A00000000000000000000004 /* XCRemoteSwiftPackageReference "swift-crypto" */;
 			productName = Crypto;
 		};
-		B00000000000000000000005 /* Sparkle */ = {isa = XCSwiftPackageProductDependency; package = A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */; productName = Sparkle; };
+		B00000000000000000000005 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
